@@ -1,8 +1,8 @@
-name: Android APK Build
+name: Android Full Native Release
 
 on:
   push:
-    branches: [main]
+    branches: [full-native-build]
   workflow_dispatch:
 
 permissions:
@@ -10,11 +10,16 @@ permissions:
 
 env:
   FLUTTER_VERSION: '3.44.9'
+  JAVA_VERSION: '17'
+  COMPILE_SDK: '36'
+  BUILD_TOOLS: '36.0.0'
+  NDK_VERSION: '28.2.13676358'
+  NATIVE_OVERLAY_SHA256: 'd54f8c1053c6de70a9e6f82adcf5df3e213be28f18f08356c3bf10c8ab85eeb4'
 
 jobs:
-  build-apk:
+  full-native-release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -35,52 +40,149 @@ jobs:
       - name: Flutter doctor
         run: flutter doctor -v
 
-      - name: Generate Android platform
+      - name: Install required Android SDK components
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" \
+            "platforms;android-${COMPILE_SDK}" \
+            "build-tools;${BUILD_TOOLS}" \
+            "ndk;${NDK_VERSION}"
+
+      - name: Generate canonical Android scaffold
         shell: bash
         run: |
           set -euo pipefail
           rm -rf android "$RUNNER_TEMP/elnemr_android_scaffold"
-          flutter create \
+          flutter create --no-pub \
             --platforms=android \
             --org com.elnemr \
             --project-name language \
             "$RUNNER_TEMP/elnemr_android_scaffold"
           cp -a "$RUNNER_TEMP/elnemr_android_scaffold/android" ./android
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('android/app/src/main/AndroidManifest.xml')
-          s = p.read_text()
-          s = s.replace('android:label="language"', 'android:label="El-Nemr Language"')
-          marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          perms = '''\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.RECORD_AUDIO"/>\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>'''
-          s = s.replace(marker, marker + perms)
-          p.write_text(s)
-          PY
           test -f android/settings.gradle.kts
           test -f android/app/build.gradle.kts
-          grep -R "com.elnemr.language" -n android/app | head
+
+      - name: Restore and verify full native Android overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find ci/native-overlay -maxdepth 1 -type f -name 'chunk-*.b64' | wc -l)" -eq 14
+          cat ci/native-overlay/chunk-*.b64 > "$RUNNER_TEMP/native-overlay.b64"
+          base64 --decode "$RUNNER_TEMP/native-overlay.b64" > "$RUNNER_TEMP/native-overlay.tar.xz"
+          echo "${NATIVE_OVERLAY_SHA256}  $RUNNER_TEMP/native-overlay.tar.xz" | sha256sum -c -
+          xz -t "$RUNNER_TEMP/native-overlay.tar.xz"
+          mkdir -p "$RUNNER_TEMP/native-overlay"
+          tar -xJf "$RUNNER_TEMP/native-overlay.tar.xz" -C "$RUNNER_TEMP/native-overlay"
+          cp -a "$RUNNER_TEMP/native-overlay/." android/
+
+      - name: Verify native feature wiring before compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          NATIVE=android/app/src/main/kotlin/com/elnemr/language
+          for f in \
+            MainActivity.kt AudioExtractor.kt SpeechCoach.kt MediaProbe.kt FileBrowser.kt \
+            WebDAVClient.kt SMBClient.kt FtpClient.kt ExoPlayerView.kt PlaybackService.kt \
+            DownloadClient.kt MediaScanner.kt PipManager.kt; do
+            test -s "$NATIVE/$f"
+          done
+          grep -q 'AudioExtractor(this).configure' "$NATIVE/MainActivity.kt"
+          grep -q 'SpeechCoach(this).configure' "$NATIVE/MainActivity.kt"
+          grep -q 'MediaProbe(this).configure' "$NATIVE/MainActivity.kt"
+          grep -q 'elnemr/audio_extractor' "$NATIVE/AudioExtractor.kt"
+          grep -q 'createOnDeviceSpeechRecognizer' "$NATIVE/SpeechCoach.kt"
+          grep -q 'EXTRA_PREFER_OFFLINE' "$NATIVE/SpeechCoach.kt"
+          grep -q 'android.permission.RECORD_AUDIO' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.READ_MEDIA_VIDEO' android/app/src/main/AndroidManifest.xml
+          grep -q 'applicationId = "com.elnemr.language"' android/app/build.gradle.kts
+          grep -q 'minSdk = 26' android/app/build.gradle.kts
+          grep -q 'compileSdk = 36' android/app/build.gradle.kts
+          grep -q 'ndkVersion = "28.2.13676358"' android/app/build.gradle.kts
+
+      - name: Generate ephemeral installable release signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          PASS="$(openssl rand -hex 18)"
+          KEYSTORE="$RUNNER_TEMP/elnemr-ci-release.jks"
+          keytool -genkeypair -noprompt \
+            -keystore "$KEYSTORE" \
+            -storepass "$PASS" \
+            -keypass "$PASS" \
+            -alias elnemr-ci \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname 'CN=El-Nemr Language CI,O=El-Nemr Language,C=EG'
+          {
+            echo "ELNEMR_KEYSTORE_PATH=$KEYSTORE"
+            echo "ELNEMR_KEYSTORE_PASSWORD=$PASS"
+            echo "ELNEMR_KEY_ALIAS=elnemr-ci"
+            echo "ELNEMR_KEY_PASSWORD=$PASS"
+          } >> "$GITHUB_ENV"
 
       - name: Resolve dependencies
         run: flutter pub get
 
+      - name: Audit resolved critical dependencies
+        run: python3 scripts/resolved_dependency_audit.py
+
       - name: Generate localizations
         run: flutter gen-l10n
 
-      - name: Build APK
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Flutter tests
+        run: flutter test --no-pub
+
+      - name: Build full native APK
         run: flutter build apk --release --no-pub
 
-      - name: Verify APK exists
+      - name: Build full native AAB
+        run: flutter build appbundle --release --no-pub
+
+      - name: Verify release artifacts and Android identity
         shell: bash
         run: |
           set -euo pipefail
-          test -f build/app/outputs/flutter-apk/app-release.apk
-          ls -lh build/app/outputs/flutter-apk/app-release.apk
-          sha256sum build/app/outputs/flutter-apk/app-release.apk
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          AAB=build/app/outputs/bundle/release/app-release.aab
+          test -s "$APK"
+          test -s "$AAB"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          test -x "$APKSIGNER"
+          test -x "$AAPT"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          "$AAPT" dump badging "$APK" | tee "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "package: name='com.elnemr.language'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "application-label:'El-Nemr Language'" "$RUNNER_TEMP/apk-badging.txt"
+          ls -lh "$APK" "$AAB"
+          sha256sum "$APK" "$AAB" | tee release-sha256.txt
 
-      - name: Upload APK
+      - name: Upload full native APK
         uses: actions/upload-artifact@v4
         with:
-          name: El-Nemr-Language-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: El-Nemr-Language-FULL-NATIVE-APK
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            release-sha256.txt
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+
+      - name: Upload full native AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: El-Nemr-Language-FULL-NATIVE-AAB
+          path: |
+            build/app/outputs/bundle/release/app-release.aab
+            release-sha256.txt
+          if-no-files-found: error
+          retention-days: 30
