@@ -1,0 +1,26 @@
+El-Nemr Language 0.9.1 RC3 - Root Gradle CWD Fix Validation
+==============================================================
+
+Fixes in this rebuild:
+- Root ./gradlew now changes working directory to android/ before delegating.
+- Root gradlew.bat now pushd's into android/ before delegating.
+- Delegation uses sh ./gradlew so loss of android/gradlew executable bit does not cause exit 126.
+- Legacy Java 11 workflows still auto-select an available Java 17+ runtime before Gradle 9.1.0 starts.
+- Gradle Wrapper bootstrap no longer tries the known-dead services.gradle.org wrapper-JAR URL; it uses the verified Gradle GitHub source and SHA-256 gate.
+- Release audit now verifies the corrected root-wrapper behavior.
+- Legacy compatibility regression test now verifies both delegation and working directory = android.
+
+Validation on rebuilt source:
+- RELEASE AUDIT PASS [android]
+- RELEASE AUDIT PASS [ios]
+- RELEASE AUDIT PASS [full]
+- STATIC VALIDATION PASS
+- FEATURE WIRING AUDIT PASS
+- PYTHON SYNTAX PASS
+- STRUCTURED FILE PARSING PASS
+- SWIFT PARSE PASS
+- ANDROID AUDIT INDEPENDENCE PASS
+- LEGACY ROOT GRADLE PERMISSION + CWD TEST PASS
+- REBUILD SOURCE VALIDATION PASS
+
+Note: Actual Flutter/Android compilation is performed by GitHub CI because this local environment does not contain Flutter/Android SDK.

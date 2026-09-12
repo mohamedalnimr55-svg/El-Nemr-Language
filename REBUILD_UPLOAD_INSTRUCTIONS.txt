@@ -1,0 +1,13 @@
+EL-NEMR LANGUAGE — CLEAN REPOSITORY REBUILD
+
+1. This archive is a COMPLETE repository source tree, not a patch.
+2. Replace the repository contents with this archive's contents; do not overlay it on an older tree.
+3. Ensure these dot-paths are present in Git after upload:
+   .github/workflows/android.yml
+   .github/workflows/ios.yml
+   .github/workflows/release.yml
+   .env.example
+   android/.gitignore
+4. For Android validation, run the workflow named: Android Release Validation.
+5. Do not use Re-run jobs on a historical workflow run; start a new run from the new commit.
+6. Android audit is platform-scoped and no longer depends on iOS/release workflow files.
