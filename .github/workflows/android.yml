@@ -1,63 +1,36 @@
-name: Materialize Verified Android Project
+name: Android Full Native Release
 
 on:
   push:
-    branches: [full-native-build]
+    branches: [full-native-build, main]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   FLUTTER_VERSION: '3.44.9'
-  NATIVE_OVERLAY_SHA256: 'd54f8c1053c6de70a9e6f82adcf5df3e213be28f18f08356c3bf10c8ab85eeb4'
+  COMPILE_SDK: '36'
+  BUILD_TOOLS: '36.0.0'
+  NDK_VERSION: '28.2.13676358'
 
 jobs:
-  materialize-android:
+  full-native-release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
-      - name: Checkout
+      - name: Checkout complete repository
         uses: actions/checkout@v5
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.44.9'
-          channel: stable
-          cache: true
-
-      - name: Generate canonical Android scaffold
+      - name: Verify committed Android project and native wiring
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf android "$RUNNER_TEMP/elnemr_android_scaffold"
-          flutter create --no-pub \
-            --platforms=android \
-            --org com.elnemr \
-            --project-name language \
-            "$RUNNER_TEMP/elnemr_android_scaffold"
-          cp -a "$RUNNER_TEMP/elnemr_android_scaffold/android" ./android
-          test -f android/settings.gradle.kts
-          test -f android/app/build.gradle.kts
-
-      - name: Restore verified full native Android overlay
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(find ci/native-overlay -maxdepth 1 -type f -name 'chunk-*.b64' | wc -l)" -eq 14
-          cat ci/native-overlay/chunk-*.b64 > "$RUNNER_TEMP/native-overlay.b64"
-          base64 --decode "$RUNNER_TEMP/native-overlay.b64" > "$RUNNER_TEMP/native-overlay.tar.xz"
-          echo "${NATIVE_OVERLAY_SHA256}  $RUNNER_TEMP/native-overlay.tar.xz" | sha256sum -c -
-          xz -t "$RUNNER_TEMP/native-overlay.tar.xz"
-          mkdir -p "$RUNNER_TEMP/native-overlay"
-          tar -xJf "$RUNNER_TEMP/native-overlay.tar.xz" -C "$RUNNER_TEMP/native-overlay"
-          cp -a "$RUNNER_TEMP/native-overlay/." android/
-
-      - name: Verify materialized native source
-        shell: bash
-        run: |
-          set -euo pipefail
+          test -s android/settings.gradle.kts
+          test -s android/app/build.gradle.kts
+          test -s android/gradlew
+          test -s android/gradlew.bat
+          test -s android/gradle/wrapper/gradle-wrapper.properties
           NATIVE=android/app/src/main/kotlin/com/elnemr/language
           for f in \
             MainActivity.kt AudioExtractor.kt SpeechCoach.kt MediaProbe.kt FileBrowser.kt \
@@ -68,24 +41,113 @@ jobs:
           grep -q 'AudioExtractor(this).configure' "$NATIVE/MainActivity.kt"
           grep -q 'SpeechCoach(this).configure' "$NATIVE/MainActivity.kt"
           grep -q 'MediaProbe(this).configure' "$NATIVE/MainActivity.kt"
+          grep -q 'elnemr/audio_extractor' "$NATIVE/AudioExtractor.kt"
+          grep -q 'createOnDeviceSpeechRecognizer' "$NATIVE/SpeechCoach.kt"
+          grep -q 'EXTRA_PREFER_OFFLINE' "$NATIVE/SpeechCoach.kt"
+          grep -q 'android.permission.RECORD_AUDIO' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.READ_MEDIA_VIDEO' android/app/src/main/AndroidManifest.xml
           grep -q 'applicationId = "com.elnemr.language"' android/app/build.gradle.kts
           grep -q 'minSdk = 26' android/app/build.gradle.kts
           grep -q 'compileSdk = 36' android/app/build.gradle.kts
           grep -q 'ndkVersion = "28.2.13676358"' android/app/build.gradle.kts
-          test -s android/gradlew
-          test -s android/gradlew.bat
-          test -s android/gradle/wrapper/gradle-wrapper.properties
 
-      - name: Commit complete Android project
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: stable
+          cache: true
+
+      - name: Install required Android SDK components
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf android/.gradle android/build android/app/build android/.idea
-          rm -f android/local.properties android/key.properties
-          find android -type f \( -name '*.jks' -o -name '*.keystore' \) -delete
-          git config user.name "El-Nemr CI"
-          git config user.email "actions@users.noreply.github.com"
-          git add -f android
-          test -n "$(git diff --cached --name-only)"
-          git commit -m "Materialize complete verified Android project [skip ci]"
-          git push origin HEAD:full-native-build
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then SDKMANAGER="$(command -v sdkmanager)"; fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" \
+            "platforms;android-${COMPILE_SDK}" \
+            "build-tools;${BUILD_TOOLS}" \
+            "ndk;${NDK_VERSION}"
+
+      - name: Generate installable release signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          PASS="$(openssl rand -hex 18)"
+          KEYSTORE="$RUNNER_TEMP/elnemr-ci-release.jks"
+          keytool -genkeypair -noprompt \
+            -keystore "$KEYSTORE" -storepass "$PASS" -keypass "$PASS" \
+            -alias elnemr-ci -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname 'CN=El-Nemr Language CI,O=El-Nemr Language,C=EG'
+          {
+            echo "ELNEMR_KEYSTORE_PATH=$KEYSTORE"
+            echo "ELNEMR_KEYSTORE_PASSWORD=$PASS"
+            echo "ELNEMR_KEY_ALIAS=elnemr-ci"
+            echo "ELNEMR_KEY_PASSWORD=$PASS"
+          } >> "$GITHUB_ENV"
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Audit resolved critical dependencies
+        run: python3 scripts/resolved_dependency_audit.py
+
+      - name: Generate localizations
+        run: flutter gen-l10n
+
+      - name: Static analysis
+        run: flutter analyze --no-fatal-infos
+
+      - name: Flutter tests
+        run: flutter test --no-pub
+
+      - name: Build full native APK
+        run: flutter build apk --release --no-pub
+
+      - name: Build full native AAB
+        run: flutter build appbundle --release --no-pub
+
+      - name: Verify signed release artifacts and Android identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          AAB=build/app/outputs/bundle/release/app-release.aab
+          test -s "$APK"
+          test -s "$AAB"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          "$AAPT" dump badging "$APK" | tee "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "package: name='com.elnemr.language'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "application-label:'El-Nemr Language'" "$RUNNER_TEMP/apk-badging.txt"
+          unzip -tq "$APK"
+          ls -lh "$APK" "$AAB"
+          sha256sum "$APK" "$AAB" | tee release-sha256.txt
+
+      - name: Upload full native APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: El-Nemr-Language-FULL-NATIVE-APK
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            release-sha256.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload full native AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: El-Nemr-Language-FULL-NATIVE-AAB
+          path: |
+            build/app/outputs/bundle/release/app-release.aab
+            release-sha256.txt
+          if-no-files-found: error
+          retention-days: 30
