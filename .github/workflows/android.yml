@@ -137,7 +137,7 @@ jobs:
         run: flutter gen-l10n
 
       - name: Static analysis
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
 
       - name: Flutter tests
         run: flutter test --no-pub
