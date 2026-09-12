@@ -36,6 +36,7 @@ void main() {
 
   testWidgets('App shows library and settings shell', (tester) async {
     await tester.pumpWidget(const ElNemrLanguageApp());
+    await tester.pumpAndSettle();
 
     expect(find.text('El-Nemr Language'), findsOneWidget);
     expect(find.textContaining('Continue watching'), findsOneWidget);
@@ -49,6 +50,7 @@ void main() {
 
   testWidgets('Switching to profile tab shows settings', (tester) async {
     await tester.pumpWidget(const ElNemrLanguageApp());
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
@@ -76,6 +78,7 @@ void main() {
       (call) async => 0,
     );
     await tester.pumpWidget(const ElNemrLanguageApp());
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();

@@ -114,13 +114,13 @@ class VocabularyStore {
   static Future<List<VocabularyItem>> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_prefsKey);
-    if (raw == null || raw.isEmpty) return const [];
+    if (raw == null || raw.isEmpty) return <VocabularyItem>[];
     try {
       final decoded = jsonDecode(raw);
-      if (decoded is! List) return const [];
+      if (decoded is! List) return <VocabularyItem>[];
       return decoded.whereType<Map>().map((e) => VocabularyItem.fromJson(Map<String, dynamic>.from(e))).where((e) => e.word.isNotEmpty).toList();
     } catch (_) {
-      return const [];
+      return <VocabularyItem>[];
     }
   }
 

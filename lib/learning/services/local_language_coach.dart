@@ -63,7 +63,7 @@ class LocalLanguageCoach {
     final lower = text.toLowerCase();
     final hints = <String>[];
     if (language == 'en') {
-      if (RegExp(r"\b(have|has|had)\s+been\s+\w+ing\b").hasMatch(lower)) {
+      if (RegExp(r"\b(?:have|has|had|i've|you've|we've|they've)\s+been\s+\w+ing\b").hasMatch(lower)) {
         hints.add('The “have/has been + -ing” pattern connects an ongoing/recent activity with the present.');
       }
       if (RegExp(r"\b(i'm|you're|he's|she's|we're|they're|don't|didn't|can't|won't|i've|you've)\b").hasMatch(lower)) {
