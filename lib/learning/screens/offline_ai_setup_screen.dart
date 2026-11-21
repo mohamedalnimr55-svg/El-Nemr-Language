@@ -129,6 +129,10 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
   @override
   Widget build(BuildContext context) {
     final profile = _profile;
+    final translationUnavailable = profile != null &&
+        (OnDeviceTranslationService.languageFor(profile.targetLanguage) == null ||
+         OnDeviceTranslationService.languageFor(profile.nativeLanguage) == null);
+    final offlineReady = _speech?.ready == true && (_translationReady || translationUnavailable);
     return Scaffold(
       appBar: AppBar(title: const Text('Offline AI readiness')),
       body: _loading
@@ -170,16 +174,18 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
                 ),
                 ListTile(
                   leading: Icon(
-                    _translationReady ? Icons.check_circle_rounded : Icons.translate_rounded,
-                    color: _translationReady ? Colors.greenAccent : Colors.amberAccent,
+                    translationUnavailable ? Icons.warning_amber_rounded : (_translationReady ? Icons.check_circle_rounded : Icons.translate_rounded),
+                    color: translationUnavailable ? Colors.orangeAccent : (_translationReady ? Colors.greenAccent : Colors.amberAccent),
                   ),
                   title: const Text('Learning translation models'),
                   subtitle: Text(
                     profile == null
                         ? 'Profile unavailable'
-                        : _translationReady
-                            ? '${profile.targetLanguage.toUpperCase()} ↔ ${profile.nativeLanguage.toUpperCase()} · ready offline'
-                            : '${profile.targetLanguage.toUpperCase()} ↔ ${profile.nativeLanguage.toUpperCase()} · download once',
+                        : translationUnavailable
+                            ? '${profile.targetLanguage.toUpperCase()} ↔ ${profile.nativeLanguage.toUpperCase()} · unsupported on-device'
+                            : _translationReady
+                                ? '${profile.targetLanguage.toUpperCase()} ↔ ${profile.nativeLanguage.toUpperCase()} · ready offline'
+                                : '${profile.targetLanguage.toUpperCase()} ↔ ${profile.nativeLanguage.toUpperCase()} · download once',
                   ),
                 ),
                 if (_preparing) ...[
@@ -197,11 +203,11 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
                 ],
                 const SizedBox(height: 16),
                 FilledButton.icon(
-                  onPressed: _preparing || (_speech?.ready == true && _translationReady) ? null : _prepare,
+                  onPressed: _preparing || offlineReady ? null : _prepare,
                   icon: const Icon(Icons.offline_bolt_rounded),
                   label: Text(
-                    _speech?.ready == true && _translationReady
-                        ? 'Offline learning is ready'
+                    offlineReady
+                        ? (translationUnavailable ? 'Speech ready · translation unavailable' : 'Offline learning is ready')
                         : 'Prepare offline learning',
                   ),
                 ),
@@ -248,9 +254,7 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                if (profile != null &&
-                    (OnDeviceTranslationService.languageFor(profile.targetLanguage) == null ||
-                     OnDeviceTranslationService.languageFor(profile.nativeLanguage) == null))
+                if (translationUnavailable)
                   const Text(
                     'This language pair is not supported by the installed on-device translation engine.',
                     style: TextStyle(color: Colors.orangeAccent),
