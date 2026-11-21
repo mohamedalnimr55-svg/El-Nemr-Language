@@ -72,11 +72,11 @@ class AiLanguageService {
 
   /// Performs an actual chat-completions round trip, not a UI-only readiness
   /// check. The caller should display any connection/configuration error.
-  static Future<String> testConnection() {
+  static Future<String> testConnection() async {
     if (!isConfigured) {
       throw const AiLanguageException('Configure an AI endpoint before testing the connection.');
     }
-    return _chat(
+    return await _chat(
       system: 'You are a language-learning service health check.',
       user: 'Reply READY.',
       temperature: 0,
