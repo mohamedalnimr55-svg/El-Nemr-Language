@@ -54,35 +54,39 @@ class SpeechCoach(private val activity: MainActivity) {
         }
         pending = result
         activity.runOnUiThread {
-            val speech = SpeechRecognizer.createOnDeviceSpeechRecognizer(activity)
-            recognizer = speech
-            speech.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-                override fun onError(error: Int) {
-                    finishError("recognition_error", "Offline speech recognition failed ($error)")
-                }
-                override fun onResults(results: Bundle?) {
-                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val best = matches?.firstOrNull()?.trim().orEmpty()
-                    if (best.isEmpty()) finishError("no_speech", "No speech was recognized")
-                    else finishSuccess(best)
-                }
-            })
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, locale)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            }
+            // Device services may report availability but still fail while
+            // constructing the recognizer (missing model, disabled service,
+            // incompatible firmware). Always complete the Flutter request
+            // instead of leaving the UI permanently in its listening state.
             try {
+                val speech = SpeechRecognizer.createOnDeviceSpeechRecognizer(activity)
+                recognizer = speech
+                speech.setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {}
+                    override fun onBeginningOfSpeech() {}
+                    override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onEndOfSpeech() {}
+                    override fun onPartialResults(partialResults: Bundle?) {}
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                    override fun onError(error: Int) {
+                        finishError("recognition_error", "Offline speech recognition failed ($error)")
+                    }
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val best = matches?.firstOrNull()?.trim().orEmpty()
+                        if (best.isEmpty()) finishError("no_speech", "No speech was recognized")
+                        else finishSuccess(best)
+                    }
+                })
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, locale)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                }
                 speech.startListening(intent)
             } catch (e: Exception) {
                 finishError("start_failed", e.message ?: "Could not start offline speech recognition")
