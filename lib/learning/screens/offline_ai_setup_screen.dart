@@ -23,12 +23,14 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
   double _speechProgress = 0;
   String? _error;
   final TextEditingController _aiEndpointController = TextEditingController();
+  final TextEditingController _aiModelController = TextEditingController();
   bool _aiChecking = false;
   String? _aiStatus;
 
   @override
   void dispose() {
     _aiEndpointController.dispose();
+    _aiModelController.dispose();
     super.dispose();
   }
 
@@ -48,6 +50,7 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
       setState(() {
         _profile = profile;
         _aiEndpointController.text = AiLanguageService.endpoint;
+        _aiModelController.text = AiLanguageService.model;
         _speech = speech;
         _translationReady = translationReady;
         _loading = false;
@@ -112,6 +115,7 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
       _aiStatus = null;
     });
     try {
+      await AiLanguageService.setModel(_aiModelController.text);
       await AiLanguageService.setEndpoint(_aiEndpointController.text);
       if (!AiLanguageService.isConfigured) {
         if (mounted) setState(() => _aiStatus = 'No AI provider configured. The local rule-based coach remains available.');
@@ -223,7 +227,8 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
                         const Text(
                           'Enter an OpenAI-compatible /v1/chat/completions endpoint. '
                           'Without a working server, only the local rule-based coach is available. '
-                          'Use HTTPS for remote gateways; never include an API key in the URL.',
+                          'Use HTTPS for remote gateways; never include an API key in the URL. '
+                          'This setting is for a trusted gateway that does not require a client-side API key.',
                         ),
                         const SizedBox(height: 12),
                         TextField(
@@ -234,6 +239,17 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
                           decoration: const InputDecoration(
                             labelText: 'AI Tutor gateway URL',
                             hintText: 'https://your-gateway.example/v1/chat/completions',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _aiModelController,
+                          enabled: !_aiChecking,
+                          autocorrect: false,
+                          decoration: const InputDecoration(
+                            labelText: 'Gateway model identifier',
+                            hintText: 'Your actual model name, e.g. llama3.2',
                             border: OutlineInputBorder(),
                           ),
                         ),
