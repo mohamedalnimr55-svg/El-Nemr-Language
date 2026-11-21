@@ -3,6 +3,7 @@ import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
 import '../models/learner_profile.dart';
 import '../services/learner_profile_store.dart';
+import '../services/ai_language_service.dart';
 import '../services/offline_speech_model_service.dart';
 import '../services/on_device_translation_service.dart';
 
@@ -21,6 +22,15 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
   bool _preparing = false;
   double _speechProgress = 0;
   String? _error;
+  final TextEditingController _aiEndpointController = TextEditingController();
+  bool _aiChecking = false;
+  String? _aiStatus;
+
+  @override
+  void dispose() {
+    _aiEndpointController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -30,12 +40,14 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
 
   Future<void> _refresh() async {
     try {
+      await AiLanguageService.loadConfiguration();
       final profile = await LearnerProfileStore.load();
       final speech = await OfflineSpeechModelService.status();
       final translationReady = await _translationModelsReady(profile);
       if (!mounted) return;
       setState(() {
         _profile = profile;
+        _aiEndpointController.text = AiLanguageService.endpoint;
         _speech = speech;
         _translationReady = translationReady;
         _loading = false;
@@ -53,7 +65,9 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
   Future<bool> _translationModelsReady(LearnerProfile profile) async {
     final source = OnDeviceTranslationService.languageFor(profile.targetLanguage);
     final target = OnDeviceTranslationService.languageFor(profile.nativeLanguage);
-    if (source == null || target == null || source == target) return true;
+    // An unsupported language pair must never be reported as downloaded.
+    if (source == null || target == null) return false;
+    if (source == target) return true;
     final manager = OnDeviceTranslatorModelManager();
     return await manager.isModelDownloaded(source.bcpCode) &&
         await manager.isModelDownloaded(target.bcpCode);
@@ -88,6 +102,27 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
       setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _preparing = false);
+    }
+  }
+
+  Future<void> _saveAndTestAi() async {
+    if (_aiChecking) return;
+    setState(() {
+      _aiChecking = true;
+      _aiStatus = null;
+    });
+    try {
+      await AiLanguageService.setEndpoint(_aiEndpointController.text);
+      if (!AiLanguageService.isConfigured) {
+        if (mounted) setState(() => _aiStatus = 'No AI provider configured. The local rule-based coach remains available.');
+        return;
+      }
+      await AiLanguageService.testConnection();
+      if (mounted) setState(() => _aiStatus = 'AI provider answered a real test request successfully.');
+    } catch (e) {
+      if (mounted) setState(() => _aiStatus = 'AI provider is not ready: $e');
+    } finally {
+      if (mounted) setState(() => _aiChecking = false);
     }
   }
 
@@ -170,7 +205,56 @@ class _OfflineAiSetupScreenState extends State<OfflineAiSetupScreen> {
                         : 'Prepare offline learning',
                   ),
                 ),
+                const SizedBox(height: 18),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Optional AI Tutor connection', style: TextStyle(fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Enter an OpenAI-compatible /v1/chat/completions endpoint. '
+                          'Without a working server, only the local rule-based coach is available. '
+                          'Use HTTPS for remote gateways; never include an API key in the URL.',
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _aiEndpointController,
+                          enabled: !_aiChecking,
+                          keyboardType: TextInputType.url,
+                          autocorrect: false,
+                          decoration: const InputDecoration(
+                            labelText: 'AI Tutor gateway URL',
+                            hintText: 'https://your-gateway.example/v1/chat/completions',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          onPressed: _aiChecking ? null : _saveAndTestAi,
+                          icon: _aiChecking
+                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.network_check),
+                          label: const Text('Save and test connection'),
+                        ),
+                        if (_aiStatus != null) ...[
+                          const SizedBox(height: 8),
+                          Text(_aiStatus!),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 12),
+                if (profile != null &&
+                    (OnDeviceTranslationService.languageFor(profile.targetLanguage) == null ||
+                     OnDeviceTranslationService.languageFor(profile.nativeLanguage) == null))
+                  const Text(
+                    'This language pair is not supported by the installed on-device translation engine.',
+                    style: TextStyle(color: Colors.orangeAccent),
+                  ),
                 const Text(
                   'If you later watch a video in a third language, El-Nemr Language may download that language model the first time it needs to translate it.',
                   style: TextStyle(color: Colors.white54, fontSize: 12),
