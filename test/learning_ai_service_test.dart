@@ -25,6 +25,17 @@ void main() {
     expect(AiLanguageService.isConfigured, isFalse);
   });
 
+  test('runtime model name is persistent and cannot be blank', () async {
+    await AiLanguageService.setModel('llama3.2');
+    expect(AiLanguageService.model, 'llama3.2');
+    await AiLanguageService.loadConfiguration();
+    expect(AiLanguageService.model, 'llama3.2');
+    await expectLater(
+      AiLanguageService.setModel('   '),
+      throwsA(isA<AiLanguageException>()),
+    );
+  });
+
   test('bad URLs and URL-embedded secrets are rejected', () async {
     for (final url in <String>[
       'not a url',
