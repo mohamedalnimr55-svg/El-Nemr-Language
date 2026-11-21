@@ -25,11 +25,14 @@ class AiLanguageService {
   const AiLanguageService._();
 
   static const String _endpointPreferenceKey = 'learning.llm.endpoint';
+  static const String _modelPreferenceKey = 'learning.llm.model';
   static const String _buildEndpoint = String.fromEnvironment('LEARNING_LLM_ENDPOINT');
   static const String apiKey = String.fromEnvironment('LEARNING_LLM_API_KEY');
-  static const String model = String.fromEnvironment('LEARNING_LLM_MODEL', defaultValue: 'gpt-4o-mini');
+  static const String _buildModel = String.fromEnvironment('LEARNING_LLM_MODEL', defaultValue: 'gpt-4o-mini');
 
   static String? _runtimeEndpoint;
+  static String? _runtimeModel;
+  static String get model => _runtimeModel ?? _buildModel;
 
   /// A user-supplied gateway can be configured after installing the APK.
   /// No API keys are persisted; credentialed gateways should issue short-lived
@@ -41,6 +44,7 @@ class AiLanguageService {
   static Future<void> loadConfiguration() async {
     final prefs = await SharedPreferences.getInstance();
     _runtimeEndpoint = prefs.getString(_endpointPreferenceKey);
+    _runtimeModel = prefs.getString(_modelPreferenceKey);
   }
 
   static Future<void> setEndpoint(String value) async {
@@ -54,6 +58,16 @@ class AiLanguageService {
       await prefs.setString(_endpointPreferenceKey, normalized);
       _runtimeEndpoint = normalized;
     }
+  }
+
+  static Future<void> setModel(String value) async {
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      throw const AiLanguageException('AI model name cannot be empty.');
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_modelPreferenceKey, normalized);
+    _runtimeModel = normalized;
   }
 
   static Uri _validateEndpoint(String value) {
