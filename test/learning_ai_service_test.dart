@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:el_nemr_language/learning/services/ai_language_service.dart';
@@ -51,6 +54,65 @@ void main() {
       );
     }
     expect(AiLanguageService.isConfigured, isFalse);
+  });
+
+  test('AI Tutor makes a real HTTP request with the configured model', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    Map<String, dynamic>? captured;
+    server.listen((request) async {
+      captured = jsonDecode(await utf8.decoder.bind(request).join())
+          as Map<String, dynamic>;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode(<String, Object>{
+          'choices': <Object>[
+            <String, Object>{
+              'message': <String, String>{'content': 'READY'},
+            },
+          ],
+        }),
+      );
+      await request.response.close();
+    });
+    try {
+      await AiLanguageService.setModel('local-test-model');
+      await AiLanguageService.setEndpoint(
+        'http://${server.address.address}:${server.port}/v1/chat/completions',
+      );
+      expect(await AiLanguageService.testConnection(), 'READY');
+      expect(captured?['model'], 'local-test-model');
+      final messages = captured?['messages'] as List<dynamic>?;
+      expect(messages, hasLength(2));
+      expect((messages!.last as Map<String, dynamic>)['content'], 'Reply READY.');
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('AI provider non-success status produces a visible error', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      await utf8.decoder.bind(request).join();
+      request.response.statusCode = HttpStatus.serviceUnavailable;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write('{"error":{"message":"gateway unavailable"}}');
+      await request.response.close();
+    });
+    try {
+      await AiLanguageService.setEndpoint(
+        'http://${server.address.address}:${server.port}/v1/chat/completions',
+      );
+      await expectLater(
+        AiLanguageService.testConnection(),
+        throwsA(isA<AiLanguageException>().having(
+          (e) => e.message,
+          'message',
+          contains('gateway unavailable'),
+        )),
+      );
+    } finally {
+      await server.close(force: true);
+    }
   });
 
   test('connection test fails clearly if no endpoint is configured', () async {
