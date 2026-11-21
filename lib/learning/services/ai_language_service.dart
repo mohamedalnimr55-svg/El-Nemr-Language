@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/subtitle_cue.dart';
 import '../models/learning_models.dart';
 import '../models/learner_profile.dart';
@@ -22,11 +24,64 @@ class AiLanguageException implements Exception {
 class AiLanguageService {
   const AiLanguageService._();
 
-  static const String endpoint = String.fromEnvironment('LEARNING_LLM_ENDPOINT');
+  static const String _endpointPreferenceKey = 'learning.llm.endpoint';
+  static const String _buildEndpoint = String.fromEnvironment('LEARNING_LLM_ENDPOINT');
   static const String apiKey = String.fromEnvironment('LEARNING_LLM_API_KEY');
   static const String model = String.fromEnvironment('LEARNING_LLM_MODEL', defaultValue: 'gpt-4o-mini');
 
+  static String? _runtimeEndpoint;
+
+  /// A user-supplied gateway can be configured after installing the APK.
+  /// No API keys are persisted; credentialed gateways should issue short-lived
+  /// tokens through a trusted backend rather than ship secrets in the client.
+  static String get endpoint => _runtimeEndpoint ?? _buildEndpoint;
+
   static bool get isConfigured => endpoint.trim().isNotEmpty;
+
+  static Future<void> loadConfiguration() async {
+    final prefs = await SharedPreferences.getInstance();
+    _runtimeEndpoint = prefs.getString(_endpointPreferenceKey);
+  }
+
+  static Future<void> setEndpoint(String value) async {
+    final normalized = value.trim();
+    if (normalized.isNotEmpty) _validateEndpoint(normalized);
+    final prefs = await SharedPreferences.getInstance();
+    if (normalized.isEmpty) {
+      await prefs.remove(_endpointPreferenceKey);
+      _runtimeEndpoint = null;
+    } else {
+      await prefs.setString(_endpointPreferenceKey, normalized);
+      _runtimeEndpoint = normalized;
+    }
+  }
+
+  static Uri _validateEndpoint(String value) {
+    final uri = Uri.tryParse(value);
+    if (uri == null ||
+        (uri.scheme != 'https' && uri.scheme != 'http') ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.fragment.isNotEmpty) {
+      throw const AiLanguageException(
+        'Enter a complete HTTP(S) chat-completions URL without credentials or a fragment.',
+      );
+    }
+    return uri;
+  }
+
+  /// Performs an actual chat-completions round trip, not a UI-only readiness
+  /// check. The caller should display any connection/configuration error.
+  static Future<String> testConnection() {
+    if (!isConfigured) {
+      throw const AiLanguageException('Configure an AI endpoint before testing the connection.');
+    }
+    return _chat(
+      system: 'You are a language-learning service health check.',
+      user: 'Reply READY.',
+      temperature: 0,
+    );
+  }
 
   static Future<List<SubtitleCue>> translateCues(
     List<SubtitleCue> cues, {
@@ -89,8 +144,8 @@ Explain the useful vocabulary, natural meaning, grammar only when helpful, conne
     required String user,
     required double temperature,
   }) async {
-    final uri = Uri.tryParse(endpoint);
-    if (uri == null || !uri.hasScheme) throw const AiLanguageException('LEARNING_LLM_ENDPOINT is invalid.');
+    if (!isConfigured) throw const AiLanguageException('AI Tutor endpoint is not configured.');
+    final uri = _validateEndpoint(endpoint);
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 20)
       ..idleTimeout = const Duration(seconds: 60);
