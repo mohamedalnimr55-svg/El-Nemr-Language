@@ -115,6 +115,67 @@ void main() {
     }
   });
 
+  test('rejects an oversized AI response with advertised Content-Length',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      await utf8.decoder.bind(request).join();
+      request.response.headers.contentType = ContentType.json;
+      request.response.add(
+        List<int>.filled(AiLanguageService.maxResponseBytes + 1, 65),
+      );
+      await request.response.close();
+    });
+    try {
+      await AiLanguageService.setEndpoint(
+        'http://${server.address.host}:${server.port}/v1/chat/completions',
+      );
+      await expectLater(
+        AiLanguageService.testConnection(),
+        throwsA(isA<AiLanguageException>().having(
+          (e) => e.message,
+          'message',
+          contains('too large'),
+        )),
+      );
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('rejects an oversized chunked AI response without Content-Length',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      await utf8.decoder.bind(request).join();
+      request.response.headers.contentType = ContentType.json;
+      request.response.bufferOutput = false;
+      request.response.add(
+        List<int>.filled(AiLanguageService.maxResponseBytes + 1, 66),
+      );
+      try {
+        await request.response.close();
+      } catch (_) {
+        // Client closes immediately when the size limit is exceeded.
+      }
+    });
+    try {
+      await AiLanguageService.setEndpoint(
+        'http://${server.address.host}:${server.port}/v1/chat/completions',
+      );
+      await expectLater(
+        AiLanguageService.testConnection(),
+        throwsA(isA<AiLanguageException>().having(
+          (e) => e.message,
+          'message',
+          contains('too large'),
+        )),
+      );
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
   test('connection test fails clearly if no endpoint is configured', () async {
     await expectLater(
       AiLanguageService.testConnection(),

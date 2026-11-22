@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -23,6 +24,10 @@ class AiLanguageException implements Exception {
 ///   --dart-define=LEARNING_LLM_API_KEY=...  (optional)
 class AiLanguageService {
   const AiLanguageService._();
+
+  /// A chat-completions response should be small; a misbehaving gateway
+  /// must not consume unbounded device memory before JSON validation.
+  static const int maxResponseBytes = 1024 * 1024;
 
   static const String _endpointPreferenceKey = 'learning.llm.endpoint';
   static const String _modelPreferenceKey = 'learning.llm.model';
@@ -177,7 +182,7 @@ Explain the useful vocabulary, natural meaning, grammar only when helpful, conne
         ],
       }));
       final response = await request.close().timeout(const Duration(minutes: 2));
-      final body = await response.transform(utf8.decoder).join()
+      final body = await _readBoundedResponse(response)
           .timeout(const Duration(minutes: 2));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw AiLanguageException(_errorMessage(response.statusCode, body));
@@ -201,6 +206,26 @@ Explain the useful vocabulary, natural meaning, grammar only when helpful, conne
     } finally {
       client.close(force: true);
     }
+  }
+
+  static Future<String> _readBoundedResponse(HttpClientResponse response) async {
+    if (response.contentLength > maxResponseBytes) {
+      throw const AiLanguageException(
+        'AI provider response is too large. The answer was not loaded.',
+      );
+    }
+    final bytes = BytesBuilder(copy: false);
+    var received = 0;
+    await for (final chunk in response) {
+      received += chunk.length;
+      if (received > maxResponseBytes) {
+        throw const AiLanguageException(
+          'AI provider response is too large. The answer was not loaded.',
+        );
+      }
+      bytes.add(chunk);
+    }
+    return utf8.decode(bytes.takeBytes());
   }
 
   static List<String> _jsonArrayFromText(String value) {
