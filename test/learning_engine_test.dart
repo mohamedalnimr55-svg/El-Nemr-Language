@@ -54,6 +54,38 @@ void main() {
           reason: 'The first subtitle must not reappear after the last cue.');
     });
 
+    test('overlapping captions retain an earlier active dialogue cue', () {
+      final engine = LearningEngine(random: Random(1));
+      const segments = <LearningSegment>[
+        LearningSegment(
+          id: 'long',
+          start: Duration(seconds: 1),
+          end: Duration(seconds: 8),
+          original: 'A long line across two subtitles',
+        ),
+        LearningSegment(
+          id: 'short',
+          start: Duration(seconds: 3),
+          end: Duration(seconds: 4),
+          original: 'Brief interruption',
+        ),
+        LearningSegment(
+          id: 'later',
+          start: Duration(seconds: 10),
+          end: Duration(seconds: 11),
+          original: 'Next scene',
+        ),
+      ];
+      expect(engine.segmentAt(segments, const Duration(seconds: 2))?.id, 'long');
+      expect(engine.segmentAt(segments, const Duration(milliseconds: 3500))?.id,
+          'short');
+      expect(engine.segmentAt(segments, const Duration(seconds: 5))?.id,
+          'long', reason: 'The earlier cue remains active after the short cue ends.');
+      expect(engine.segmentAt(segments, const Duration(seconds: 8)), isNull);
+      expect(engine.segmentAt(segments, const Duration(seconds: 9)), isNull);
+      expect(engine.segmentAt(segments, const Duration(seconds: 10))?.id, 'later');
+    });
+
     test('answer scoring is normalized and punctuation-insensitive', () {
       final engine = LearningEngine(random: Random(1));
       expect(engine.scoreAnswer('Hello, WORLD!', 'hello world'), 1.0);
