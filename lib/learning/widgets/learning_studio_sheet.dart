@@ -135,8 +135,11 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     }
   }
 
-  LearningSegment? get _current => _engine.segmentAt(widget.segments, _livePosition) ??
-      (widget.segments.isNotEmpty ? widget.segments.first : null);
+  // Do not surface the video's FIRST sentence when playback is in a gap
+  // between subtitle cues. That made quizzes/explanations target unrelated
+  // dialogue as soon as the movie moved off a captioned interval.
+  LearningSegment? get _current =>
+      _engine.segmentAt(widget.segments, _livePosition);
 
   @override
   Widget build(BuildContext context) {
@@ -258,7 +261,12 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
               if (current == null)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Text('Add an original-language subtitle to create lessons and quizzes from this video.', style: TextStyle(color: Colors.white60)),
+                  child: Text(
+                    widget.segments.isEmpty
+                        ? 'Add an original-language subtitle to create lessons and quizzes from this video.'
+                        : 'No spoken line at the current playback position. Seek to a subtitled line to practise.',
+                    style: const TextStyle(color: Colors.white60),
+                  ),
                 )
               else ...[
                 const Text('Current learning segment', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
