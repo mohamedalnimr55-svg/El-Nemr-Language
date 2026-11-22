@@ -5,8 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:el_nemr_language/learning/services/subtitle_text_loader.dart';
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-
   test('remote subtitle streams and decodes valid UTF-8', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((request) async {
