@@ -38,6 +38,19 @@ void main() {
     expect(assessment.pace, isNull);
   });
 
+  test('Thai transcript completeness is not incorrectly perfect', () {
+    final engine = LearningEngine();
+    final answer = engine.scoreDetailed('สวัสด', 'สวัสดี');
+    final assessment = assessSpeech(
+      answer: answer,
+      expectedText: 'สวัสดี',
+      expectedDuration: const Duration(seconds: 2),
+    );
+    expect(answer.score, inExclusiveRange(0, 1));
+    expect(assessment.completeness, inExclusiveRange(0, 1));
+    expect(assessment.wordAccuracy, answer.score);
+  });
+
   test('matching words at actor pace scores very highly', () {
     final result = assessSpeech(
       answer: perfect,

@@ -170,6 +170,21 @@ void main() {
       expect(engine.scoreAnswer('你好', '你好'), 1);
     });
 
+    test('non-Latin scripts do not get false perfect scores when text differs', () {
+      final engine = LearningEngine(random: Random(1));
+      expect(engine.scoreAnswer('नमस्ते', 'नमस्ते!'), 1);
+      expect(engine.scoreAnswer('नमस्ते', 'धन्यवाद'), lessThan(1));
+      expect(engine.scoreAnswer('שלום', 'բוקר'), lessThan(1));
+      expect(engine.scoreAnswer('γειά', 'αντίο'), lessThan(1));
+      expect(engine.scoreAnswer('привет', 'пока'), lessThan(1));
+      expect(engine.scoreAnswer('xin chào', 'xin chào'), 1);
+      expect(engine.scoreAnswer('🦊', '🦁'), 0,
+          reason: 'Unknown nonempty scripts/symbols must not be treated as empty.');
+      expect(engine.scoreAnswer('สวัสด', 'สวัสดี'), inExclusiveRange(0, 1),
+          reason: 'Unspaced Thai receives partial credit, not 0 or 100%.');
+      expect(engine.scoreAnswer('ສະບາ', 'ສະບາຍ'), inExclusiveRange(0, 1));
+    });
+
     test('detailed scoring reports missing and different words', () {
       final engine = LearningEngine(random: Random(1));
       final result = engine.scoreDetailed('I go school', 'I go to school');
