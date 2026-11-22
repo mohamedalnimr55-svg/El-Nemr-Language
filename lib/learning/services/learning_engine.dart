@@ -7,16 +7,33 @@ class AnswerScore {
     required this.score,
     required this.missingWords,
     required this.extraWords,
+    this.scorable = true,
   });
 
   final double score;
   final List<String> missingWords;
   final List<String> extraWords;
+  /// False if computing a valid edit-distance grade would exceed safe limits.
+  /// Callers must not save unscorable responses as failed learning attempts.
+  final bool scorable;
 
   bool get perfect => score >= 0.999;
 }
 
 class LearningEngine {
+  // The alignment matrix has O(responseTokens * expectedTokens) memory/time.
+  // Enforce deterministic limits rather than letting large pasted/speech text
+  // exhaust device resources or freeze the learning view.
+  static const int maxScoreTextCodeUnits = 16000;
+  static const int maxScoreMatrixCells = 250000;
+
+  static const AnswerScore unscorableAnswer = AnswerScore(
+    score: 0,
+    missingWords: <String>[],
+    extraWords: <String>[],
+    scorable: false,
+  );
+
   LearningEngine({Random? random}) : _random = random ?? Random();
   final Random _random;
 
@@ -100,8 +117,17 @@ class LearningEngine {
   double scoreAnswer(String answer, String expected) => scoreDetailed(answer, expected).score;
 
   AnswerScore scoreDetailed(String answer, String expected) {
+    // Tokenization itself also allocates: reject pathological input first.
+    if (answer.length > maxScoreTextCodeUnits ||
+        expected.length > maxScoreTextCodeUnits) {
+      return unscorableAnswer;
+    }
     final actual = tokenizeLearningText(answer);
     final target = tokenizeLearningText(expected);
+    if ((actual.length + 1) * (target.length + 1) >
+        maxScoreMatrixCells) {
+      return unscorableAnswer;
+    }
     if (target.isEmpty) {
       return AnswerScore(
         score: actual.isEmpty ? 1.0 : 0.0,
