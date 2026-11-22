@@ -66,7 +66,9 @@ List<LearningSegment> segmentsFromCues(
       difficulty: estimateLearningDifficulty(cue.text, cue.end - cue.start),
     ));
   }
-  return out;
+  // Timeline indexes are cached by list identity. Every rebuild returns a
+  // fresh immutable list so no in-place edit can invalidate the end-time tree.
+  return List<LearningSegment>.unmodifiable(out);
 }
 
 String? _translationNear(SubtitleCue cue, List<SubtitleCue> translated, int startIndex) {
