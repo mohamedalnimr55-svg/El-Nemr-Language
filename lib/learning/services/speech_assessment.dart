@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'learning_engine.dart';
+import 'learning_text_tokenizer.dart';
 
 class SpeechAssessment {
   const SpeechAssessment({
@@ -12,7 +13,8 @@ class SpeechAssessment {
 
   final double wordAccuracy;
   final double completeness;
-  final double pace;
+  /// Null when only the recognition request duration is available.
+  final double? pace;
   final double overall;
 }
 
@@ -26,24 +28,30 @@ SpeechAssessment assessSpeech({
   required AnswerScore answer,
   required String expectedText,
   required Duration expectedDuration,
-  required Duration speakingDuration,
+  Duration? speakingDuration,
 }) {
-  final expectedWords = _tokens(expectedText).length;
+  final expectedWords = tokenizeLearningText(expectedText).length;
   final missing = answer.missingWords.length.clamp(0, expectedWords);
   final completeness = expectedWords == 0
       ? answer.score
       : ((expectedWords - missing) / expectedWords).clamp(0.0, 1.0).toDouble();
 
-  final expectedMs = max(1, expectedDuration.inMilliseconds);
-  final actualMs = max(1, speakingDuration.inMilliseconds);
-  final ratio = actualMs / expectedMs;
-  // Full credit around the actor's pace, gradually decreasing for very fast
-  // or very slow delivery. 0.5x and 2x still get partial credit rather than 0.
-  final pace = (1.0 - (ratio - 1.0).abs() / 1.35).clamp(0.0, 1.0).toDouble();
+  // Word recognition takes time to initialize and finalize. Do not treat
+  // stopwatch wall time around a platform recognition call as speaking time.
+  // Only calculate pace if a recorder supplies measured speech duration.
+  final double? pace;
+  if (speakingDuration == null) {
+    pace = null;
+  } else {
+    final expectedMs = max(1, expectedDuration.inMilliseconds);
+    final actualMs = max(1, speakingDuration.inMilliseconds);
+    final ratio = actualMs / expectedMs;
+    pace = (1.0 - (ratio - 1.0).abs() / 1.35).clamp(0.0, 1.0).toDouble();
+  }
   final overall = (
-    answer.score * 0.55 +
-    completeness * 0.25 +
-    pace * 0.20
+    pace == null
+      ? answer.score * 0.70 + completeness * 0.30
+      : answer.score * 0.55 + completeness * 0.25 + pace * 0.20
   ).clamp(0.0, 1.0).toDouble();
 
   return SpeechAssessment(
@@ -54,16 +62,3 @@ SpeechAssessment assessSpeech({
   );
 }
 
-List<String> _tokens(String value) => value
-    .toLowerCase()
-    .replaceAll(
-      RegExp(
-        r'[^\w\u00C0-\u024F\u0400-\u052F\u0600-\u06FF\u0750-\u077F\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]+',
-        unicode: true,
-      ),
-      ' ',
-    )
-    .trim()
-    .split(RegExp(r'\s+'))
-    .where((e) => e.isNotEmpty)
-    .toList(growable: false);

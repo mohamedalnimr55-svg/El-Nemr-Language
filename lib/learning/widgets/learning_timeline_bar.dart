@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/learning_models.dart';
+import '../services/learning_progress_store.dart';
 
 class LearningTimelineBar extends StatelessWidget {
   const LearningTimelineBar({
@@ -72,8 +73,10 @@ class _LearningTimelinePainter extends CustomPainter {
       final end = (s.end.inMilliseconds / totalMs).clamp(0.0, 1.0).toDouble() * size.width;
       if (end <= start) continue;
       final raw = progress[s.id];
-      final p = raw is Map ? raw : const {};
-      final best = (p['best'] as num?)?.toDouble();
+      final stored = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+      final best = LearningProgressStore.matchesSegment(stored, s)
+          ? (stored['best'] as num?)?.toDouble()
+          : null;
       final color = best != null && best >= .85
           ? Colors.greenAccent
           : s.difficulty >= .72

@@ -4,7 +4,10 @@ class SubtitleParser {
   const SubtitleParser._();
 
   static List<SubtitleCue> parse(String source, {String? extension}) {
-    final normalized = source.replaceFirst('\uFEFF', '').replaceAll('\r\n', '\n');
+    final normalized = source
+        .replaceFirst('\uFEFF', '')
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n');
     final ext = (extension ?? '').toLowerCase();
     if (ext.endsWith('vtt') || normalized.trimLeft().startsWith('WEBVTT')) {
       return _parseVtt(normalized);
@@ -26,9 +29,14 @@ class SubtitleParser {
       if (timeIndex < 0) continue;
       final m = timeRe.firstMatch(lines[timeIndex]);
       if (m == null) continue;
-      final text = lines.skip(timeIndex + 1).join('\n').trim();
+      final text = _clean(lines.skip(timeIndex + 1).join('\n'));
+      // Styling-only cue blocks are not spoken dialogue and must not become
+      // blank quizzes or vocabulary cards.
       if (text.isEmpty) continue;
-      cues.add(SubtitleCue(start: _clock(m.group(1)!), end: _clock(m.group(2)!), text: _clean(text)));
+      final start = _clock(m.group(1)!);
+      final end = _clock(m.group(2)!);
+      if (end <= start) continue;
+      cues.add(SubtitleCue(start: start, end: end, text: text));
     }
     cues.sort((a, b) => a.start.compareTo(b.start));
     return cues;
@@ -37,9 +45,22 @@ class SubtitleParser {
   static List<SubtitleCue> _parseVtt(String source) {
     final lines = source.split('\n');
     final cues = <SubtitleCue>[];
-    final timeRe = RegExp(r'(?:(\d{1,2}):)?(\d{2}):(\d{2})[.](\d{1,3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.](\d{1,3})');
+    final timeRe = RegExp(r'^\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.](\d{1,3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.](\d{1,3})');
     var i = 0;
     while (i < lines.length) {
+      final directive = lines[i].trim();
+      // NOTE comments, STYLE and REGION blocks are not dialogue. Their
+      // contents can legitimately include timestamp-like strings.
+      if (directive == 'NOTE' ||
+          directive.startsWith('NOTE ') ||
+          directive == 'STYLE' ||
+          directive == 'REGION') {
+        i++;
+        while (i < lines.length && lines[i].trim().isNotEmpty) {
+          i++;
+        }
+        continue;
+      }
       final m = timeRe.firstMatch(lines[i]);
       if (m == null) { i++; continue; }
       final start = _vttClock(m.group(1), m.group(2)!, m.group(3)!, m.group(4)!);
@@ -47,9 +68,16 @@ class SubtitleParser {
       i++;
       final text = <String>[];
       while (i < lines.length && lines[i].trim().isNotEmpty) { text.add(lines[i]); i++; }
-      final value = _clean(text.join('\n'));
-      if (value.isNotEmpty) cues.add(SubtitleCue(start: start, end: end, text: value));
+      // Preserve WebVTT speaker metadata in a dialogue-label form that
+      // parseDialogueLine() understands. Styling tags still get stripped.
+      final value = _cleanVttCue(text.join('\n'));
+      if (value.isNotEmpty && end > start) {
+        cues.add(SubtitleCue(start: start, end: end, text: value));
+      }
     }
+    // SubtitleLayer.activeCues and LearningEngine.segmentAt both rely on a
+    // start-sorted timeline. WebVTT files can list cues out of order.
+    cues.sort((a, b) => a.start.compareTo(b.start));
     return cues;
   }
 
@@ -81,7 +109,25 @@ class SubtitleParser {
       if (startIndex >= fields.length || endIndex >= fields.length || textIndex >= fields.length) continue;
       final text = _cleanAss(fields.sublist(textIndex).join(','));
       if (text.isEmpty) continue;
-      cues.add(SubtitleCue(start: _assClock(fields[startIndex]), end: _assClock(fields[endIndex]), text: text));
+      final start = _assClock(fields[startIndex]);
+      final end = _assClock(fields[endIndex]);
+      // A corrupt timing field should discard this cue, not crash the
+      // entire ASS/SSA import and lose valid dialogue that follows it.
+      if (start == null || end == null || end <= start) continue;
+      // ASS/SSA may carry the speaking character in the Name field.
+      // Preserve it for Role Play, but never turn a blank or malformed
+      // metadata value into spoken dialogue.
+      final nameIndex = format.indexOf('name');
+      final speaker = nameIndex >= 0 && nameIndex < fields.length
+          ? fields[nameIndex].trim()
+          : '';
+      final validSpeaker = speaker.isNotEmpty &&
+          speaker.length <= 32 &&
+          !speaker.contains(RegExp(r'[\r\n\[\]]'));
+      final dialogue = validSpeaker && !text.startsWith('[$speaker]')
+          ? '[$speaker] $text'
+          : text;
+      cues.add(SubtitleCue(start: start, end: end, text: dialogue));
     }
     cues.sort((a, b) => a.start.compareTo(b.start));
     return cues;
@@ -98,6 +144,24 @@ class SubtitleParser {
     }
     out.add(rest);
     return out;
+  }
+
+  static String _cleanVttCue(String value) {
+    final raw = value.trimLeft();
+    final voice = RegExp(
+      r'^<v(?:\.[^ >]+)*\s+([^>]+)>',
+      caseSensitive: false,
+    ).firstMatch(raw);
+    final cleaned = _clean(value);
+    final speaker = voice?.group(1)?.trim();
+    if (cleaned.isEmpty ||
+        speaker == null ||
+        speaker.isEmpty ||
+        speaker.length > 32 ||
+        speaker.contains(RegExp(r'[\r\n\[\]]'))) {
+      return cleaned;
+    }
+    return '[$speaker] $cleaned';
   }
 
   static String _clean(String value) => value
@@ -122,10 +186,22 @@ class SubtitleParser {
 
   static Duration _vttClock(String? h, String m, String s, String ms) => Duration(hours: int.tryParse(h ?? '0') ?? 0, minutes: int.tryParse(m) ?? 0, seconds: int.tryParse(s) ?? 0, milliseconds: _millis(ms));
 
-  static Duration _assClock(String value) {
-    final p = value.trim().split(':');
-    final sec = p.last.split('.');
-    return Duration(hours: int.tryParse(p.length > 2 ? p[p.length - 3] : '0') ?? 0, minutes: int.tryParse(p[p.length - 2]) ?? 0, seconds: int.tryParse(sec[0]) ?? 0, milliseconds: (int.tryParse(sec.length > 1 ? sec[1].padRight(2, '0').substring(0, 2) : '0') ?? 0) * 10);
+  static final RegExp _assTimestamp =
+      RegExp(r'^(\d{1,5}):([0-5]\d):([0-5]\d)\.(\d{1,2})$');
+
+  // ASS/SSA timecodes use H:MM:SS.cc (centiseconds), unlike SRT/VTT.
+  // Never coerce malformed fields to 00:00:00 or index missing components.
+  static Duration? _assClock(String value) {
+    final match = _assTimestamp.firstMatch(value.trim());
+    if (match == null) return null;
+    final hours = int.tryParse(match.group(1)!);
+    if (hours == null) return null;
+    return Duration(
+      hours: hours,
+      minutes: int.parse(match.group(2)!),
+      seconds: int.parse(match.group(3)!),
+      milliseconds: int.parse(match.group(4)!.padRight(2, '0')) * 10,
+    );
   }
 
   static int _millis(String value) {
