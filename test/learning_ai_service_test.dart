@@ -121,6 +121,7 @@ void main() {
     server.listen((request) async {
       await utf8.decoder.bind(request).join();
       request.response.headers.contentType = ContentType.json;
+      request.response.contentLength = AiLanguageService.maxResponseBytes + 1;
       request.response.add(
         List<int>.filled(AiLanguageService.maxResponseBytes + 1, 65),
       );
