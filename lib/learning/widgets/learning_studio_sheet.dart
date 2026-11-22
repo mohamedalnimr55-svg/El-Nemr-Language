@@ -676,15 +676,16 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _metricChip('Words', _lastSpeechAssessment!.wordAccuracy),
+            _metricChip('Recognized words', _lastSpeechAssessment!.wordAccuracy),
             _metricChip('Completeness', _lastSpeechAssessment!.completeness),
-            _metricChip('Pace', _lastSpeechAssessment!.pace),
+            if (_lastSpeechAssessment!.pace != null)
+              _metricChip('Pace', _lastSpeechAssessment!.pace!),
             _metricChip('Overall', _lastSpeechAssessment!.overall),
           ],
         ),
         const SizedBox(height: 6),
         const Text(
-          'Local word/timing feedback · not phoneme or accent scoring.',
+          'Speech-to-text word matching only. Speaking pace and accent are not measured here.',
           style: TextStyle(color: Colors.white38, fontSize: 11),
         ),
       ],
@@ -764,7 +765,9 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       if (mounted) setState(() => _aiExplanation = explanation);
     } catch (e) {
       if (mounted) {
-        setState(() => _aiError = 'Could not explain this scene locally: $e');
+        setState(() => _aiError = AiLanguageService.isConfigured
+            ? 'AI Tutor gateway failed: $e'
+            : 'Local Coach could not explain the scene: $e');
       }
     } finally {
       if (mounted) setState(() => _aiBusy = false);
@@ -796,9 +799,9 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     widget.onPauseForSpeech();
     setState(() { _listening = true; _speechError = null; _lastScore = null; _lastAnswerScore = null; _lastSpeechAssessment = null; });
     try {
-      final stopwatch = Stopwatch()..start();
+      // The time spent waiting for Android SpeechRecognizer is NOT the
+      // learner's actual speaking duration. Do not report it as pace.
       final text = await SpeechCoachService.instance.listen(languageCode: _targetLanguage());
-      stopwatch.stop();
       if (!mounted) return;
       if (text == null) return;
       final detail = _engine.scoreDetailed(text, segment.original);
@@ -806,7 +809,6 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         answer: detail,
         expectedText: segment.original,
         expectedDuration: segment.duration,
-        speakingDuration: stopwatch.elapsed,
       );
       final score = assessment.overall;
       widget.onRecordScore(segment.id, score);
