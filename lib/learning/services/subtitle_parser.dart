@@ -85,7 +85,23 @@ class SubtitleParser {
       if (startIndex >= fields.length || endIndex >= fields.length || textIndex >= fields.length) continue;
       final text = _cleanAss(fields.sublist(textIndex).join(','));
       if (text.isEmpty) continue;
-      cues.add(SubtitleCue(start: _assClock(fields[startIndex]), end: _assClock(fields[endIndex]), text: text));
+      final start = _assClock(fields[startIndex]);
+      final end = _assClock(fields[endIndex]);
+      if (end <= start) continue;
+      // ASS/SSA may carry the speaking character in the Name field.
+      // Preserve it for Role Play, but never turn a blank or malformed
+      // metadata value into spoken dialogue.
+      final nameIndex = format.indexOf('name');
+      final speaker = nameIndex >= 0 && nameIndex < fields.length
+          ? fields[nameIndex].trim()
+          : '';
+      final validSpeaker = speaker.isNotEmpty &&
+          speaker.length <= 32 &&
+          !speaker.contains(RegExp(r'[\\r\\n\\[\\]]'));
+      final dialogue = validSpeaker && !text.startsWith('[$speaker]')
+          ? '[$speaker] $text'
+          : text;
+      cues.add(SubtitleCue(start: start, end: end, text: dialogue));
     }
     cues.sort((a, b) => a.start.compareTo(b.start));
     return cues;
