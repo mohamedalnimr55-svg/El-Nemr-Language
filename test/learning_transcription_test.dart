@@ -15,6 +15,8 @@ void main() {
     expect(TranscriptionService.whisperLanguage('und'), 'auto');
     expect(TranscriptionService.whisperLanguage(null), 'auto');
     expect(TranscriptionService.whisperLanguage(''), 'auto');
+    expect(TranscriptionService.whisperLanguage('zh-Hant'), 'zh');
+    expect(TranscriptionService.whisperLanguage('en-US-extra'), 'auto');
     expect(TranscriptionService.whisperLanguage('not-a-language'), 'auto');
   });
 
