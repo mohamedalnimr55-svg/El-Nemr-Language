@@ -897,7 +897,9 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       final score = assessment.overall;
       widget.onRecordScore(segment, score);
       if (VideoFlashcardStore.matchesSegment(_flashcards[segment.id], segment)) {
-        await VideoFlashcardStore.review(widget.videoKey, segment.id, score);
+        await VideoFlashcardStore.review(
+          widget.videoKey, segment.id, score, expectedSegment: segment,
+        );
         await _loadFlashcards();
       }
       if (!stillCurrent()) return;
@@ -941,7 +943,9 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     });
     widget.onRecordScore(q.segment, score);
     if (VideoFlashcardStore.matchesSegment(_flashcards[q.segment.id], q.segment)) {
-      VideoFlashcardStore.review(widget.videoKey, q.segment.id, score).then((_) => _loadFlashcards());
+      VideoFlashcardStore.review(
+        widget.videoKey, q.segment.id, score, expectedSegment: q.segment,
+      ).then((_) => _loadFlashcards());
     }
   }
 
