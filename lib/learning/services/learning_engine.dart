@@ -44,23 +44,28 @@ class LearningEngine {
   }
 
   QuizQuestion questionFor(LearningSegment segment, {required LearningMode mode, String nativeLanguage = 'en'}) {
-    final translated = segment.translation?.trim();
+    // Speaker annotations belong in dialogue metadata/UI, not in the words
+    // a learner must dictate, translate, or pronounce.
+    final spoken = parseDialogueLine(segment.original).text;
+    final translated = segment.translation == null
+        ? null
+        : parseDialogueLine(segment.translation!).text.trim();
     final ar = nativeLanguage.toLowerCase().startsWith('ar');
     if (mode == LearningMode.listening) {
-      return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته في المقطع' : 'Type exactly what you heard', answer: segment.original, segment: segment);
+      return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته في المقطع' : 'Type exactly what you heard', answer: spoken, segment: segment);
     }
     if (translated != null && translated.isNotEmpty) {
       if (_random.nextBool()) {
         return QuizQuestion(kind: QuizKind.translateToNative, prompt: ar ? 'ترجم الجملة إلى لغتك' : 'Translate the line into your language', answer: translated, segment: segment);
       }
-      return QuizQuestion(kind: QuizKind.translateToTarget, prompt: ar ? 'اكتب الجملة باللغة التي تتعلمها' : 'Write the line in the language you are learning', answer: segment.original, segment: segment);
+      return QuizQuestion(kind: QuizKind.translateToTarget, prompt: ar ? 'اكتب الجملة باللغة التي تتعلمها' : 'Write the line in the language you are learning', answer: spoken, segment: segment);
     }
-    final words = segment.original.split(RegExp(r'\s+')).where((e) => e.length > 2).toList();
+    final words = spoken.split(RegExp(r'\s+')).where((e) => e.length > 2).toList();
     if (words.isNotEmpty) {
       final word = words[_random.nextInt(words.length)];
-      return QuizQuestion(kind: QuizKind.fillBlank, prompt: segment.original.replaceFirst(word, '_____'), answer: word, segment: segment);
+      return QuizQuestion(kind: QuizKind.fillBlank, prompt: spoken.replaceFirst(word, '_____'), answer: word, segment: segment);
     }
-    return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته' : 'Type what you heard', answer: segment.original, segment: segment);
+    return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته' : 'Type what you heard', answer: spoken, segment: segment);
   }
 
   double scoreAnswer(String answer, String expected) => scoreDetailed(answer, expected).score;
