@@ -57,7 +57,7 @@ class LearningStudioSheet extends StatefulWidget {
   final VoidCallback onAddSubtitle;
   final ValueChanged<bool> onEditLayoutChanged;
   final bool editLayout;
-  final void Function(String segmentId, double score) onRecordScore;
+  final void Function(LearningSegment segment, double score) onRecordScore;
   final VoidCallback onPauseForSpeech;
   final LearnerProfile profile;
   final ValueChanged<LearnerProfile> onProfileChanged;
@@ -895,7 +895,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         expectedDuration: segment.duration,
       );
       final score = assessment.overall;
-      widget.onRecordScore(segment.id, score);
+      widget.onRecordScore(segment, score);
       if (VideoFlashcardStore.matchesSegment(_flashcards[segment.id], segment)) {
         await VideoFlashcardStore.review(widget.videoKey, segment.id, score);
         await _loadFlashcards();
@@ -939,7 +939,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       _lastScore = score;
       _lastAnswerScore = detail;
     });
-    widget.onRecordScore(q.segment.id, score);
+    widget.onRecordScore(q.segment, score);
     if (VideoFlashcardStore.matchesSegment(_flashcards[q.segment.id], q.segment)) {
       VideoFlashcardStore.review(widget.videoKey, q.segment.id, score).then((_) => _loadFlashcards());
     }
