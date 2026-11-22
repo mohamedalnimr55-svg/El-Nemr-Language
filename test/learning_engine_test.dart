@@ -86,6 +86,29 @@ void main() {
       expect(engine.segmentAt(segments, const Duration(seconds: 10))?.id, 'later');
     });
 
+    test('dictation and translation quizzes omit VTT speaker metadata', () {
+      final engine = LearningEngine(random: Random(42));
+      const annotated = LearningSegment(
+        id: 'speaker',
+        start: Duration(seconds: 1),
+        end: Duration(seconds: 2),
+        original: '[Sarah] I am home.',
+        translation: '[سارة] أنا في البيت.',
+      );
+
+      final listening = engine.questionFor(
+        annotated,
+        mode: LearningMode.listening,
+      );
+      expect(listening.answer, 'I am home.');
+      final quiz = engine.questionFor(annotated, mode: LearningMode.test);
+      expect(quiz.answer, anyOf('I am home.', 'أنا في البيت.'));
+      expect(quiz.answer, isNot(contains('[Sarah]')));
+      expect(quiz.answer, isNot(contains('[سارة]')));
+      final recognized = parseDialogueLine(annotated.original).text;
+      expect(engine.scoreAnswer('I am home.', recognized), 1);
+    });
+
     test('answer scoring is normalized and punctuation-insensitive', () {
       final engine = LearningEngine(random: Random(1));
       expect(engine.scoreAnswer('Hello, WORLD!', 'hello world'), 1.0);
