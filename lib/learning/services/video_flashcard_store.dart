@@ -48,12 +48,22 @@ class VideoFlashcardStore {
     return true;
   });
 
-  static Future<void> review(String videoKey, String segmentId, double score) =>
+  static Future<void> review(
+    String videoKey,
+    String segmentId,
+    double score, {
+    LearningSegment? expectedSegment,
+  }) =>
       LearningWriteQueue.run<void>(_key(videoKey), () async {
     final prefs = await SharedPreferences.getInstance();
     final cards = await load(videoKey);
     final card = cards[segmentId];
-    if (card == null) return;
+    // The button's cached card can be replaced while this queued write waits.
+    // Check the disk-backed card version again immediately before grading.
+    if (card == null ||
+        (expectedSegment != null && !matchesSegment(card, expectedSegment))) {
+      return;
+    }
 
     var repetitions = (card['repetitions'] as num?)?.toInt() ?? 0;
     var interval = (card['intervalDays'] as num?)?.toInt() ?? 0;
