@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:el_nemr_language/learning/services/subtitle_parser.dart';
+import 'package:el_nemr_language/learning/models/learning_models.dart';
 
 void main() {
   group('SubtitleParser', () {
@@ -37,6 +38,36 @@ Bye
       expect(cues.first.start, const Duration(seconds: 1, milliseconds: 100));
       expect(cues.first.text, 'Hello\nworld');
       expect(cues.last.text, 'Bye');
+    });
+
+    test('WebVTT speaker tags survive parsing for real role-play lines', () {
+      const source = '''WEBVTT
+
+00:00:01.000 --> 00:00:02.500
+<v Sarah>Hello, John.</v>
+
+00:00:03.000 --> 00:00:04.500
+<v John>Hi, Sarah.</v>
+''';
+      final cues = SubtitleParser.parse(source, extension: 'vtt');
+      expect(cues, hasLength(2));
+      final sarah = parseDialogueLine(cues.first.text);
+      final john = parseDialogueLine(cues.last.text);
+      expect(sarah.speaker, 'Sarah');
+      expect(sarah.text, 'Hello, John.');
+      expect(john.speaker, 'John');
+      expect(john.text, 'Hi, Sarah.');
+    });
+
+    test('WebVTT styling without voice labels remains plain text', () {
+      const source = '''WEBVTT
+
+00:00:01.000 --> 00:00:02.500
+<i>This is important.</i>
+''';
+      final cues = SubtitleParser.parse(source, extension: 'vtt');
+      expect(cues.single.text, 'This is important.');
+      expect(parseDialogueLine(cues.single.text).speaker, isNull);
     });
 
     test('parses ASS dialogue and removes override tags', () {
