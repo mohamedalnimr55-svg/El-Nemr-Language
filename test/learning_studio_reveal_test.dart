@@ -8,6 +8,15 @@ import 'package:el_nemr_language/learning/widgets/learning_studio_sheet.dart';
 void main() {
   testWidgets('revealing a quiz answer disables grading and does not earn credit',
       (tester) async {
+    // The Learning Studio is a tall bottom sheet. Flutter's default
+    // 800×600 test viewport can put its buttons outside the test root even
+    // after scrolling the internal DraggableScrollableSheet.
+    tester.view.physicalSize = const Size(1200, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final recordedScores = <double>[];
     const segment = LearningSegment(
@@ -56,17 +65,11 @@ void main() {
     ));
     await tester.pump();
 
-    await tester.scrollUntilVisible(
-      find.text('Quiz me'), 160,
-      scrollable: find.byType(Scrollable).first,
-    );
+    await tester.ensureVisible(find.text('Quiz me'));
     await tester.tap(find.text('Quiz me'));
     await tester.pump();
 
-    await tester.scrollUntilVisible(
-      find.text('Show answer'), 160,
-      scrollable: find.byType(Scrollable).first,
-    );
+    await tester.ensureVisible(find.text('Show answer'));
     await tester.tap(find.text('Show answer'));
     await tester.pump();
 
