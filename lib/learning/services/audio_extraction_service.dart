@@ -69,11 +69,21 @@ class AudioExtractionService {
       }
       final sink = stagedFile.openWrite();
       try {
-        await response.timeout(networkInactivityTimeout).pipe(sink);
+        // Stream.pipe() closes its sink on completion/error. Closing the same
+        // IOSink again in a finally block masks the original TimeoutException
+        // with FileSystemException("File closed"). Explicit streaming lets us
+        // preserve the network timeout and reliably clean up partial files.
+        await for (final chunk in response.timeout(networkInactivityTimeout)) {
+          sink.add(chunk);
+        }
+        await sink.flush();
       } finally {
-        // Close the file even after a timeout; otherwise Windows may refuse
-        // to remove the partial download from the temporary directory.
-        await sink.close();
+        try {
+          await sink.close();
+        } catch (_) {
+          // Never replace the original network/storage failure with a
+          // secondary error while closing the partial temporary file.
+        }
       }
       if (!await stagedFile.exists() || await stagedFile.length() == 0) {
         throw const AudioExtractionException(
