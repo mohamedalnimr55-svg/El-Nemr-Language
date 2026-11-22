@@ -62,7 +62,9 @@ void main() {
     await tester.pump();
     await tester.ensureVisible(find.byTooltip('Save video flashcard'));
     final button = tester.widget<IconButton>(
-      find.byTooltip('Save video flashcard'),
+      find.byWidgetPredicate(
+        (widget) => widget is IconButton && widget.tooltip == 'Save video flashcard',
+      ),
     );
     final firstCallback = button.onPressed!;
     firstCallback();
