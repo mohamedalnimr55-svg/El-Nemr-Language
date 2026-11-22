@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -42,4 +43,58 @@ void main() {
     expect(prepared.source, '/tmp/example.mp4');
     await prepared.dispose();
   });
+  test('protected media fails instead of hanging when server never sends headers',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final release = Completer<void>();
+    server.listen((request) async {
+      await release.future;
+      try {
+        request.response.write('late');
+        await request.response.close();
+      } catch (_) {}
+    });
+    try {
+      await expectLater(
+        AudioExtractionService.prepareSource(
+          'http://${server.address.host}:${server.port}/stalled.mkv',
+          networkInactivityTimeout: const Duration(milliseconds: 300),
+        ),
+        throwsA(isA<AudioExtractionException>()
+            .having((e) => e.message, 'message', contains('stopped responding'))),
+      );
+    } finally {
+      release.complete();
+      await server.close(force: true);
+    }
+  });
+
+  test('protected media fails if transfer stops after initial bytes',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final release = Completer<void>();
+    server.listen((request) async {
+      request.response.contentLength = 1024;
+      request.response.add(const <int>[1, 2, 3, 4]);
+      await request.response.flush();
+      await release.future;
+      try {
+        await request.response.close();
+      } catch (_) {}
+    });
+    try {
+      await expectLater(
+        AudioExtractionService.prepareSource(
+          'http://${server.address.host}:${server.port}/partial.mkv',
+          networkInactivityTimeout: const Duration(milliseconds: 300),
+        ),
+        throwsA(isA<AudioExtractionException>()
+            .having((e) => e.message, 'message', contains('stopped responding'))),
+      );
+    } finally {
+      release.complete();
+      await server.close(force: true);
+    }
+  });
+
 }
