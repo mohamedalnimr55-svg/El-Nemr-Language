@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'learning_write_queue.dart';
 
 class LearningProgressStore {
   const LearningProgressStore._();
@@ -12,7 +13,8 @@ class LearningProgressStore {
     try { return Map<String, dynamic>.from(jsonDecode(raw) as Map); } catch (_) { return <String, dynamic>{}; }
   }
 
-  static Future<void> record(String videoKey, String segmentId, double score) async {
+  static Future<void> record(String videoKey, String segmentId, double score) =>
+      LearningWriteQueue.run<void>(_key(videoKey), () async {
     final prefs = await SharedPreferences.getInstance();
     final data = await load(videoKey);
     final old = Map<String, dynamic>.from(data[segmentId] as Map? ?? const {});
@@ -25,5 +27,5 @@ class LearningProgressStore {
       'updatedAt': DateTime.now().toIso8601String(),
     };
     await prefs.setString(_key(videoKey), jsonEncode(data));
-  }
+  });
 }
