@@ -329,6 +329,41 @@ void main() {
       expect(engine.scoreAnswer('Hello, world!', 'hello world'), 1);
     });
 
+    test('oversized scoring matrices return an unscorable result, not a fake grade',
+        () {
+      final engine = LearningEngine(random: Random(1));
+      final entered = List<String>.generate(600, (i) => 'actual$i').join(' ');
+      final expected = List<String>.generate(600, (i) => 'expected$i').join(' ');
+      expect(entered.length, lessThan(LearningEngine.maxScoreTextCodeUnits));
+      expect(expected.length, lessThan(LearningEngine.maxScoreTextCodeUnits));
+      final score = engine.scoreDetailed(entered, expected);
+      expect(score.scorable, isFalse);
+      expect(score.perfect, isFalse);
+      expect(score.missingWords, isEmpty);
+      expect(score.extraWords, isEmpty);
+    });
+
+    test('very long single-token content is rejected before tokenization',
+        () {
+      final engine = LearningEngine(random: Random(1));
+      final huge = List<String>.filled(
+        LearningEngine.maxScoreTextCodeUnits + 1, 'x',
+      ).join();
+      final score = engine.scoreDetailed(huge, 'x');
+      expect(score.scorable, isFalse);
+      expect(score.perfect, isFalse);
+    });
+
+    test('ordinary multilingual answers remain gradeable', () {
+      final engine = LearningEngine(random: Random(1));
+      final arabic = engine.scoreDetailed('صباح الخير', 'صباح الخير');
+      expect(arabic.scorable, isTrue);
+      expect(arabic.score, 1);
+      final chinese = engine.scoreDetailed('你好世', '你好世界');
+      expect(chinese.scorable, isTrue);
+      expect(chinese.score, closeTo(.75, .001));
+    });
+
     test('detailed scoring reports missing and different words', () {
       final engine = LearningEngine(random: Random(1));
       final result = engine.scoreDetailed('I go school', 'I go to school');
