@@ -84,6 +84,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   bool _questionGraded = false;
   double? _lastScore;
   AnswerScore? _lastAnswerScore;
+  String? _gradingError;
   SpeechAssessment? _lastSpeechAssessment;
   late LearningMode _mode;
   late bool _editLayout;
@@ -137,6 +138,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
           _answer.clear();
           _lastScore = null;
           _lastAnswerScore = null;
+          _gradingError = null;
         }
         _lastSpeechAssessment = null;
         _speechError = null;
@@ -556,7 +558,11 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(q.prompt, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
       const SizedBox(height: 10),
-      TextField(controller: _answer, readOnly: _answerRevealed || _questionGraded, minLines: 1, maxLines: 4, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: 'اكتب إجابتك…', hintStyle: TextStyle(color: Colors.white38), border: OutlineInputBorder())),
+      TextField(controller: _answer, readOnly: _answerRevealed || _questionGraded, minLines: 1, maxLines: 4, style: const TextStyle(color: Colors.white), onChanged: (_) { if (_gradingError != null) setState(() => _gradingError = null); }, decoration: const InputDecoration(hintText: 'اكتب إجابتك…', hintStyle: TextStyle(color: Colors.white38), border: OutlineInputBorder())),
+      if (_gradingError != null) Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(_gradingError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+      ),
       const SizedBox(height: 10),
       Row(children: [
         FilledButton(
@@ -571,6 +577,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
             if (!_questionGraded) {
               _lastScore = null;
               _lastAnswerScore = null;
+              _gradingError = null;
             }
           }),
           child: const Text('Show answer'),
@@ -896,6 +903,11 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       // Role-play speaker labels must not be scored as spoken words.
       final spokenLine = parseDialogueLine(segment.original).text;
       final detail = _engine.scoreDetailed(text, spokenLine);
+      if (!detail.scorable) {
+        if (stillCurrent()) setState(() => _speechError =
+            'Speech transcript is too long to grade safely. Try a shorter sentence.');
+        return;
+      }
       final assessment = assessSpeech(
         answer: detail,
         expectedText: spokenLine,
@@ -933,6 +945,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       _answer.clear();
       _lastScore = null;
       _lastAnswerScore = null;
+      _gradingError = null;
     });
   }
 
@@ -941,11 +954,17 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     if (q == null || _answerRevealed || _questionGraded ||
         !_sameSegment(_current, q.segment)) return;
     final detail = _engine.scoreDetailed(_answer.text, q.answer);
+    if (!detail.scorable) {
+      setState(() => _gradingError =
+          'Answer is too long to grade safely. Shorten it and try again.');
+      return; // Never record a fake zero or alter flashcard intervals.
+    }
     final score = detail.score;
     // Commit the state before side effects. Multiple taps on Check (or
     // repeated callbacks before a frame) must count as only one attempt.
     setState(() {
       _questionGraded = true;
+      _gradingError = null;
       _lastScore = score;
       _lastAnswerScore = detail;
     });
