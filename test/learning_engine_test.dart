@@ -164,6 +164,63 @@ void main() {
       expect(engine.segmentAt(segments, const Duration(seconds: 10))?.id, 'later');
     });
 
+    test('large video timeline resolves long overlapping cues without a gap scan',
+        () {
+      final engine = LearningEngine(random: Random(1));
+      final segments = List<LearningSegment>.unmodifiable(<LearningSegment>[
+        const LearningSegment(
+          id: 'long-voice',
+          start: Duration.zero,
+          end: Duration(hours: 1),
+          original: 'Long commentary still active',
+        ),
+        ...List<LearningSegment>.generate(
+          10000,
+          (i) => LearningSegment(
+            id: 'short-$i',
+            start: Duration(milliseconds: (i + 1) * 100),
+            end: Duration(milliseconds: (i + 1) * 100 + 60),
+            original: 'Short cue $i',
+          ),
+        ),
+      ]);
+
+      expect(engine.segmentAt(segments, const Duration(milliseconds: 500150))?.id,
+          'short-5000');
+      // Thousands of short captions have ended; the earliest long one
+      // remains active. Repeated calls should reuse the same max-end tree.
+      for (var attempt = 0; attempt < 100; attempt++) {
+        expect(engine.segmentAt(segments, const Duration(seconds: 1200))?.id,
+            'long-voice');
+      }
+      expect(engine.segmentAt(segments, const Duration(hours: 1)), isNull);
+      expect(engine.segmentAt(segments, const Duration(seconds: -1)), isNull);
+    });
+
+    test('rebuilt subtitle timelines are immutable and reindexed independently',
+        () {
+      final engine = LearningEngine(random: Random(2));
+      final original = segmentsFromCues(const <SubtitleCue>[
+        SubtitleCue(
+          start: Duration(seconds: 1),
+          end: Duration(seconds: 2),
+          text: 'Old line',
+        ),
+      ]);
+      final replacement = segmentsFromCues(const <SubtitleCue>[
+        SubtitleCue(
+          start: Duration(seconds: 1),
+          end: Duration(seconds: 5),
+          text: 'Updated line',
+        ),
+      ]);
+      expect(() => original.add(replacement.single), throwsUnsupportedError);
+      expect(engine.segmentAt(original, const Duration(seconds: 3)), isNull);
+      expect(engine.segmentAt(replacement, const Duration(seconds: 3))?.original,
+          'Updated line');
+      expect(engine.segmentAt(original, const Duration(seconds: 3)), isNull);
+    });
+
     test('dictation and translation quizzes omit VTT speaker metadata', () {
       final engine = LearningEngine(random: Random(42));
       const annotated = LearningSegment(
