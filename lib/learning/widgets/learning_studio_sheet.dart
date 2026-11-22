@@ -80,6 +80,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   final TextEditingController _answer = TextEditingController();
   QuizQuestion? _question;
   bool _answerRevealed = false;
+  bool _questionGraded = false;
   double? _lastScore;
   AnswerScore? _lastAnswerScore;
   SpeechAssessment? _lastSpeechAssessment;
@@ -116,6 +117,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         _activeSegmentId = currentId;
         _question = null;
         _answerRevealed = false;
+        _questionGraded = false;
         _answer.clear();
         _lastScore = null;
         _lastAnswerScore = null;
@@ -529,26 +531,28 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(q.prompt, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
       const SizedBox(height: 10),
-      TextField(controller: _answer, minLines: 1, maxLines: 4, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: 'اكتب إجابتك…', hintStyle: TextStyle(color: Colors.white38), border: OutlineInputBorder())),
+      TextField(controller: _answer, readOnly: _answerRevealed || _questionGraded, minLines: 1, maxLines: 4, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: 'اكتب إجابتك…', hintStyle: TextStyle(color: Colors.white38), border: OutlineInputBorder())),
       const SizedBox(height: 10),
       Row(children: [
         FilledButton(
-          onPressed: _answerRevealed ? null : _grade,
-          child: Text(_answerRevealed ? 'Revealed · not graded' : 'Check'),
+          onPressed: _answerRevealed || _questionGraded ? null : _grade,
+          child: Text(_questionGraded ? 'Graded' : _answerRevealed ? 'Revealed · not graded' : 'Check'),
         ),
         const SizedBox(width: 10),
         TextButton(
           onPressed: _answerRevealed ? null : () => setState(() {
             _answer.text = q.answer;
             _answerRevealed = true;
-            _lastScore = null;
-            _lastAnswerScore = null;
+            if (!_questionGraded) {
+              _lastScore = null;
+              _lastAnswerScore = null;
+            }
           }),
           child: const Text('Show answer'),
         ),
         IconButton(
           tooltip: 'Answer by voice',
-          onPressed: _listening || _answerRevealed ? null : () => _listenAndFill(q),
+          onPressed: _listening || _answerRevealed || _questionGraded ? null : () => _listenAndFill(q),
           icon: _listening
               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
               : const Icon(Icons.mic, color: Colors.lightBlueAccent),
@@ -769,6 +773,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     setState(() {
       _question = _engine.questionFor(segment, mode: LearningMode.test, nativeLanguage: _profile.nativeLanguage);
       _answerRevealed = false;
+      _questionGraded = false;
       _answer.clear();
       _lastScore = null;
       _lastAnswerScore = null;
@@ -827,7 +832,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         targetLanguage: _targetLanguage(),
       );
       final text = await SpeechCoachService.instance.listen(languageCode: language);
-      if (!mounted || !identical(_question, question) || _answerRevealed) return;
+      if (!mounted || !identical(_question, question) || _answerRevealed || _questionGraded) return;
       if (text != null) _answer.text = text;
     } catch (e) {
       if (mounted) setState(() => _speechError = e.toString());
@@ -876,6 +881,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     setState(() {
       _question = _engine.questionFor(segment, mode: _mode, nativeLanguage: _profile.nativeLanguage);
       _answerRevealed = false;
+      _questionGraded = false;
       _answer.clear();
       _lastScore = null;
       _lastAnswerScore = null;
@@ -884,17 +890,20 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
 
   void _grade() {
     final q = _question;
-    if (q == null || _answerRevealed) return;
+    if (q == null || _answerRevealed || _questionGraded) return;
     final detail = _engine.scoreDetailed(_answer.text, q.answer);
     final score = detail.score;
+    // Commit the state before side effects. Multiple taps on Check (or
+    // repeated callbacks before a frame) must count as only one attempt.
+    setState(() {
+      _questionGraded = true;
+      _lastScore = score;
+      _lastAnswerScore = detail;
+    });
     widget.onRecordScore(q.segment.id, score);
     if (_flashcards.containsKey(q.segment.id)) {
       VideoFlashcardStore.review(widget.videoKey, q.segment.id, score).then((_) => _loadFlashcards());
     }
-    setState(() {
-      _lastScore = score;
-      _lastAnswerScore = detail;
-    });
   }
 
 

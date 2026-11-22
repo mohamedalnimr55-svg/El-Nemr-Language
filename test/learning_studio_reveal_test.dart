@@ -78,6 +78,30 @@ void main() {
     );
     expect(revealed.onPressed, isNull);
     expect(recordedScores, isEmpty);
+
+    // A fresh question may be graded, but two rapid Check events must not
+    // register two progress attempts or schedule two flashcard reviews.
+    await tester.ensureVisible(find.text('Quiz me'));
+    await tester.tap(find.text('Quiz me'));
+    await tester.pump();
+    await tester.ensureVisible(find.text('Check'));
+    await tester.enterText(find.byType(TextField).last, 'my answer');
+    await tester.tap(find.text('Check'));
+    await tester.tap(find.text('Check'));
+    await tester.pump();
+
+    expect(recordedScores, hasLength(1));
+    final graded = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Graded'),
+    );
+    expect(graded.onPressed, isNull);
+
+    await tester.tap(find.text('Show answer'));
+    await tester.pump();
+    expect(recordedScores, hasLength(1),
+        reason: 'Showing the correct answer after grading must not add attempts.');
+    expect(find.text('Graded'), findsOneWidget);
+
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }
