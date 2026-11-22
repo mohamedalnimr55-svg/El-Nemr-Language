@@ -19,19 +19,26 @@ class LearningEngine {
   LearningEngine({Random? random}) : _random = random ?? Random();
   final Random _random;
 
+  // Timelines are sorted by start time, but subtitles may overlap (for
+  // example two speakers or a long caption with a shorter interjection).
+  // Binary-searching by BOTH start and end incorrectly discarded an earlier
+  // active cue whenever a later, shorter cue had already ended.
   LearningSegment? segmentAt(List<LearningSegment> segments, Duration position) {
     var lo = 0;
-    var hi = segments.length - 1;
-    while (lo <= hi) {
+    var hi = segments.length;
+    // Find the first cue which starts strictly after the current position.
+    while (lo < hi) {
       final mid = (lo + hi) >> 1;
-      final s = segments[mid];
-      if (position < s.start) {
-        hi = mid - 1;
-      } else if (position >= s.end) {
+      if (segments[mid].start <= position) {
         lo = mid + 1;
       } else {
-        return s;
+        hi = mid;
       }
+    }
+    // Prefer the most recently started active cue. Earlier, longer captions
+    // are still eligible if the newer one has already ended.
+    for (var i = lo - 1; i >= 0; i--) {
+      if (position < segments[i].end) return segments[i];
     }
     return null;
   }
