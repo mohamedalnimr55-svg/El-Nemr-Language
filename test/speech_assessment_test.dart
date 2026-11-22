@@ -25,6 +25,19 @@ void main() {
     expect(assessment.overall, closeTo(0.8 * 0.70 + 0.8 * 0.30, 0.001));
   });
 
+  test('CJK completeness uses the same scoring units as the evaluator', () {
+    final engine = LearningEngine();
+    final answer = engine.scoreDetailed('你好世', '你好世界');
+    final assessment = assessSpeech(
+      answer: answer,
+      expectedText: '你好世界',
+      expectedDuration: const Duration(seconds: 2),
+    );
+    expect(assessment.wordAccuracy, closeTo(.75, .001));
+    expect(assessment.completeness, closeTo(.75, .001));
+    expect(assessment.pace, isNull);
+  });
+
   test('matching words at actor pace scores very highly', () {
     final result = assessSpeech(
       answer: perfect,

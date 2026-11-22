@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'learning_engine.dart';
+import 'learning_text_tokenizer.dart';
 
 class SpeechAssessment {
   const SpeechAssessment({
@@ -29,7 +30,7 @@ SpeechAssessment assessSpeech({
   required Duration expectedDuration,
   Duration? speakingDuration,
 }) {
-  final expectedWords = _tokens(expectedText).length;
+  final expectedWords = tokenizeLearningText(expectedText).length;
   final missing = answer.missingWords.length.clamp(0, expectedWords);
   final completeness = expectedWords == 0
       ? answer.score
@@ -61,16 +62,3 @@ SpeechAssessment assessSpeech({
   );
 }
 
-List<String> _tokens(String value) => value
-    .toLowerCase()
-    .replaceAll(
-      RegExp(
-        r'[^\w\u00C0-\u024F\u0400-\u052F\u0600-\u06FF\u0750-\u077F\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]+',
-        unicode: true,
-      ),
-      ' ',
-    )
-    .trim()
-    .split(RegExp(r'\s+'))
-    .where((e) => e.isNotEmpty)
-    .toList(growable: false);

@@ -692,7 +692,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         Text('Shadow practice', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
       ]),
       const SizedBox(height: 8),
-      const Text('Listen once, then repeat the line. The first score checks recognized words; phoneme-level pronunciation scoring can be added as a separate provider.', style: TextStyle(color: Colors.white54, fontSize: 12)),
+      const Text('Listen once, then repeat the line. Scores compare recognized text, including characters in languages without spaces. This does not measure pronunciation or accent.', style: TextStyle(color: Colors.white54, fontSize: 12)),
       if (_speechError != null) ...[
         const SizedBox(height: 8),
         Text(_speechError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
@@ -711,7 +711,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _metricChip('Recognized words', _lastSpeechAssessment!.wordAccuracy),
+            _metricChip('Transcript match', _lastSpeechAssessment!.wordAccuracy),
             _metricChip('Completeness', _lastSpeechAssessment!.completeness),
             if (_lastSpeechAssessment!.pace != null)
               _metricChip('Pace', _lastSpeechAssessment!.pace!),
@@ -720,7 +720,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Speech-to-text word matching only. Speaking pace and accent are not measured here.',
+          'Speech-to-text similarity only; not phoneme or accent accuracy. Speaking pace is not measured here.',
           style: TextStyle(color: Colors.white38, fontSize: 11),
         ),
       ],

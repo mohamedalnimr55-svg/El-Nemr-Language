@@ -1,5 +1,6 @@
 import 'dart:math';
 import '../models/learning_models.dart';
+import 'learning_text_tokenizer.dart';
 
 class AnswerScore {
   const AnswerScore({
@@ -81,8 +82,8 @@ class LearningEngine {
   double scoreAnswer(String answer, String expected) => scoreDetailed(answer, expected).score;
 
   AnswerScore scoreDetailed(String answer, String expected) {
-    final actual = _tokens(answer);
-    final target = _tokens(expected);
+    final actual = tokenizeLearningText(answer);
+    final target = tokenizeLearningText(expected);
     if (target.isEmpty) {
       return AnswerScore(
         score: actual.isEmpty ? 1.0 : 0.0,
@@ -149,11 +150,4 @@ class LearningEngine {
     );
   }
 
-  List<String> _tokens(String value) => value
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^\w\u00C0-\u024F\u0400-\u052F\u0600-\u06FF\u0750-\u077F\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]+', unicode: true), ' ')
-      .trim()
-      .split(RegExp(r'\s+'))
-      .where((e) => e.isNotEmpty)
-      .toList();
 }

@@ -151,6 +151,25 @@ void main() {
       expect(engine.scoreAnswer('مرحبا بك', 'مرحبا بك'), 1.0);
     });
 
+    test('CJK responses receive partial credit for missing characters', () {
+      final engine = LearningEngine(random: Random(1));
+      final chinese = engine.scoreDetailed('你好世', '你好世界');
+      expect(chinese.score, closeTo(0.75, 0.001));
+      expect(chinese.missingWords, <String>['界']);
+      expect(chinese.extraWords, isEmpty);
+
+      final japanese = engine.scoreDetailed('こんにち', 'こんにちは');
+      expect(japanese.score, closeTo(0.8, 0.001));
+      expect(japanese.missingWords, <String>['は']);
+
+      final korean = engine.scoreDetailed('안녕하세', '안녕하세요');
+      expect(korean.score, closeTo(0.8, 0.001));
+      expect(korean.missingWords, <String>['요']);
+
+      expect(engine.scoreAnswer('hello 世界', 'HELLO，世界！'), 1);
+      expect(engine.scoreAnswer('你好', '你好'), 1);
+    });
+
     test('detailed scoring reports missing and different words', () {
       final engine = LearningEngine(random: Random(1));
       final result = engine.scoreDetailed('I go school', 'I go to school');
