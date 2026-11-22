@@ -29,12 +29,14 @@ class SubtitleParser {
       if (timeIndex < 0) continue;
       final m = timeRe.firstMatch(lines[timeIndex]);
       if (m == null) continue;
-      final text = lines.skip(timeIndex + 1).join('\n').trim();
+      final text = _clean(lines.skip(timeIndex + 1).join('\n'));
+      // Styling-only cue blocks are not spoken dialogue and must not become
+      // blank quizzes or vocabulary cards.
       if (text.isEmpty) continue;
       final start = _clock(m.group(1)!);
       final end = _clock(m.group(2)!);
       if (end <= start) continue;
-      cues.add(SubtitleCue(start: start, end: end, text: _clean(text)));
+      cues.add(SubtitleCue(start: start, end: end, text: text));
     }
     cues.sort((a, b) => a.start.compareTo(b.start));
     return cues;
