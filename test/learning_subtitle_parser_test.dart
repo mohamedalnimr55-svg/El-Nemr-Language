@@ -40,6 +40,25 @@ Bye
       expect(cues.last.text, 'Bye');
     });
 
+    test('sorts out-of-order WebVTT cues for video playback and seeking', () {
+      const source = '''WEBVTT
+
+00:00:10.000 --> 00:00:12.000
+Late cue
+
+00:00:01.000 --> 00:00:03.000
+First cue
+
+00:00:05.000 --> 00:00:07.000
+Middle cue
+''';
+      final cues = SubtitleParser.parse(source, extension: 'vtt');
+      expect(cues.map((cue) => cue.text),
+          <String>['First cue', 'Middle cue', 'Late cue']);
+      expect(cues.first.start, const Duration(seconds: 1));
+      expect(cues.last.start, const Duration(seconds: 10));
+    });
+
     test('SRT ignores styling-only subtitle cues', () {
       const source = '''1
 00:00:01,000 --> 00:00:02,000

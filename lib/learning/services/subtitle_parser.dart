@@ -75,6 +75,9 @@ class SubtitleParser {
         cues.add(SubtitleCue(start: start, end: end, text: value));
       }
     }
+    // SubtitleLayer.activeCues and LearningEngine.segmentAt both rely on a
+    // start-sorted timeline. WebVTT files can list cues out of order.
+    cues.sort((a, b) => a.start.compareTo(b.start));
     return cues;
   }
 
