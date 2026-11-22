@@ -812,10 +812,12 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       final text = await SpeechCoachService.instance.listen(languageCode: _targetLanguage());
       if (!mounted) return;
       if (text == null) return;
-      final detail = _engine.scoreDetailed(text, segment.original);
+      // Role-play speaker labels must not be scored as spoken words.
+      final spokenLine = parseDialogueLine(segment.original).text;
+      final detail = _engine.scoreDetailed(text, spokenLine);
       final assessment = assessSpeech(
         answer: detail,
-        expectedText: segment.original,
+        expectedText: spokenLine,
         expectedDuration: segment.duration,
       );
       final score = assessment.overall;
