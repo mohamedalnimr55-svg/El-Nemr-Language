@@ -3,7 +3,15 @@ name: Android Full Native Release
 on:
   push:
     branches: [full-native-build, main]
+  pull_request:
+    branches: [full-native-build]
   workflow_dispatch:
+
+# New commits supersede older PR checks, so only the newest source revision
+# is built and uploaded. Do not cancel an independent release on main.
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -76,7 +84,42 @@ jobs:
             "build-tools;${BUILD_TOOLS}" \
             "ndk;${NDK_VERSION}"
 
-      - name: Generate installable release signing key
+      # A new key per PR is appropriate for disposable integration testing,
+      # but must never be mistaken for the stable key needed to update an app.
+      # Expose production secrets ONLY to main pushes, never PR source code.
+      - name: Configure persistent production signing
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in SIGNING_KEYSTORE_BASE64 SIGNING_STORE_PASSWORD SIGNING_KEY_ALIAS SIGNING_KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required Android production signing secret: $name"
+              exit 1
+            fi
+          done
+          KEYSTORE="$RUNNER_TEMP/elnemr-production-release.jks"
+          printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          test -s "$KEYSTORE"
+          keytool -list -keystore "$KEYSTORE" \
+            -storepass "$SIGNING_STORE_PASSWORD" \
+            -alias "$SIGNING_KEY_ALIAS" >/dev/null
+          {
+            echo "ELNEMR_KEYSTORE_PATH=$KEYSTORE"
+            echo "ELNEMR_KEYSTORE_PASSWORD=$SIGNING_STORE_PASSWORD"
+            echo "ELNEMR_KEY_ALIAS=$SIGNING_KEY_ALIAS"
+            echo "ELNEMR_KEY_PASSWORD=$SIGNING_KEY_PASSWORD"
+            echo "ELNEMR_SIGNING_MODE=persistent-production"
+          } >> "$GITHUB_ENV"
+          echo 'Signing: **persistent production key** from GitHub Secrets.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate isolated validation signing key
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         shell: bash
         run: |
           set -euo pipefail
@@ -91,7 +134,9 @@ jobs:
             echo "ELNEMR_KEYSTORE_PASSWORD=$PASS"
             echo "ELNEMR_KEY_ALIAS=elnemr-ci"
             echo "ELNEMR_KEY_PASSWORD=$PASS"
+            echo "ELNEMR_SIGNING_MODE=ephemeral-validation"
           } >> "$GITHUB_ENV"
+          echo 'Signing: **temporary per-run validation key**. APK installable but not a production update identity.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Resolve dependencies
         run: flutter pub get
@@ -101,6 +146,9 @@ jobs:
 
       - name: Generate localizations
         run: flutter gen-l10n
+
+      - name: Audit Android release and feature wiring
+        run: bash scripts/release_audit.sh android
 
       - name: Static analysis
         run: flutter analyze --no-fatal-infos
