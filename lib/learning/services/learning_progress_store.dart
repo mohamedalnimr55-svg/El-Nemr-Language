@@ -14,13 +14,17 @@ class LearningProgressStore {
     try { return Map<String, dynamic>.from(jsonDecode(raw) as Map); } catch (_) { return <String, dynamic>{}; }
   }
 
-  /// Only scores with matching original text and timing may influence
-  /// adaptive practice. Subtitle replacements often reuse timestamp IDs.
+  /// Only scores from the exact same original text, translation and timing
+  /// may influence adaptive practice. Translation replacements can reuse IDs.
+  /// Pre-existing records without translation identity are preserved, but
+  /// cannot safely establish that the answer language/content was unchanged.
   static bool matchesSegment(
     Map<String, dynamic>? progress,
     LearningSegment segment,
   ) => progress != null &&
+      progress.containsKey('translation') &&
       progress['original'] == segment.original &&
+      progress['translation'] == segment.translation &&
       progress['startMs'] == segment.start.inMilliseconds &&
       progress['endMs'] == segment.end.inMilliseconds;
 
@@ -44,6 +48,7 @@ class LearningProgressStore {
       'last': score,
       if (segment != null) ...<String, dynamic>{
         'original': segment.original,
+        'translation': segment.translation,
         'startMs': segment.start.inMilliseconds,
         'endMs': segment.end.inMilliseconds,
       },
