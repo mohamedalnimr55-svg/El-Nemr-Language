@@ -95,6 +95,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   String? _aiExplanation;
   String? _aiError;
   Map<String, Map<String, dynamic>> _flashcards = <String, Map<String, dynamic>>{};
+  final Set<String> _flashcardToggleBusy = <String>{};
   Timer? _positionTicker;
   String? _activeSegmentId;
 
@@ -309,7 +310,9 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
                     IconButton(
                       tooltip: VideoFlashcardStore.matchesSegment(_flashcards[current.id], current)
                           ? 'Remove video flashcard' : 'Save video flashcard',
-                      onPressed: () => _toggleFlashcard(current),
+                      onPressed: _flashcardToggleBusy.contains(current.id)
+                          ? null
+                          : () => _toggleFlashcard(current),
                       icon: Icon(VideoFlashcardStore.matchesSegment(_flashcards[current.id], current)
                           ? Icons.star : Icons.star_border, color: Colors.amberAccent),
                     ),
@@ -775,8 +778,17 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   }
 
   Future<void> _toggleFlashcard(LearningSegment segment) async {
-    await VideoFlashcardStore.toggle(widget.videoKey, segment);
-    await _loadFlashcards();
+    // A double tap can dispatch two callbacks before the IconButton rebuilds.
+    // Guard synchronously so the same card isn't saved then removed again.
+    if (!_flashcardToggleBusy.add(segment.id)) return;
+    if (mounted) setState(() {});
+    try {
+      await VideoFlashcardStore.toggle(widget.videoKey, segment);
+      await _loadFlashcards();
+    } finally {
+      _flashcardToggleBusy.remove(segment.id);
+      if (mounted) setState(() {});
+    }
   }
 
   void _reviewNextDue() {
