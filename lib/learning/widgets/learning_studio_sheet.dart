@@ -741,9 +741,11 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     );
   }
 
-  List<MapEntry<String, Map<String, dynamic>>> get _dueFlashcards => _flashcards.entries
-      .where((e) => VideoFlashcardStore.isDue(e.value))
-      .toList(growable: false);
+  List<MapEntry<String, Map<String, dynamic>>> get _dueFlashcards =>
+      VideoFlashcardStore.dueForSegments(
+        _flashcards,
+        widget.segments.map((segment) => segment.id),
+      );
 
   Future<void> _loadFlashcards() async {
     try {

@@ -55,6 +55,34 @@ void main() {
     expect(seg['last'], 0.9);
   });
 
+  test('stale flashcards do not hide valid due reviews after subtitle edits', () async {
+    const removed = LearningSegment(
+      id: 'removed-caption',
+      start: Duration(seconds: 1),
+      end: Duration(seconds: 2),
+      original: 'Old text',
+    );
+    const active = LearningSegment(
+      id: 'current-caption',
+      start: Duration(seconds: 3),
+      end: Duration(seconds: 4),
+      original: 'Current words',
+    );
+    await VideoFlashcardStore.toggle('video', removed);
+    await VideoFlashcardStore.toggle('video', active);
+    final cards = await VideoFlashcardStore.load('video');
+
+    final due = VideoFlashcardStore.dueForSegments(
+      cards,
+      <String>[active.id],
+    );
+    expect(due.map((e) => e.key), <String>[active.id]);
+    expect(cards.containsKey(removed.id), isTrue,
+        reason: 'Existing stored cards are preserved until explicitly deleted.');
+    final none = VideoFlashcardStore.dueForSegments(cards, <String>[]);
+    expect(none, isEmpty);
+  });
+
   test('video flashcard toggles and schedules successful review', () async {
     const segment = LearningSegment(
       id: 'seg-card',

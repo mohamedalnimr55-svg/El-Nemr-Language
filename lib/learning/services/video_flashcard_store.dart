@@ -83,6 +83,20 @@ class VideoFlashcardStore {
     await prefs.setString(_key(videoKey), jsonEncode(cards));
   }
 
+  /// Only review flashcards still backed by a subtitle in the current video.
+  /// Stale cards can remain after subtitle replacement/removal; they should
+  /// not block a valid due card or inflate the user's review count.
+  static List<MapEntry<String, Map<String, dynamic>>> dueForSegments(
+    Map<String, Map<String, dynamic>> cards,
+    Iterable<String> activeSegmentIds, {
+    DateTime? now,
+  }) {
+    final ids = activeSegmentIds.toSet();
+    return cards.entries
+        .where((entry) => ids.contains(entry.key) && isDue(entry.value, now: now))
+        .toList(growable: false);
+  }
+
   static bool isDue(Map<String, dynamic> card, {DateTime? now}) {
     final raw = card['dueAt'] as String?;
     final due = raw == null ? null : DateTime.tryParse(raw);
