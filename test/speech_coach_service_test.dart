@@ -27,7 +27,40 @@ void main() {
       timeout: const Duration(milliseconds: 100),
     );
     expect(text, 'Hello, how are you?');
-    expect(locale, 'en-US');
+    expect(locale, 'en-GB');
+  });
+
+  test('preserves valid regional dialects in native speech requests', () async {
+    final received = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      received.add(
+        (call.arguments as Map<Object?, Object?>)['locale'] as String,
+      );
+      return 'spoken words';
+    });
+
+    for (final language in <String>[
+      'en_GB',
+      'es-MX',
+      'ar-EG',
+      'pt-BR',
+      'zh-Hant-TW',
+      'en',
+    ]) {
+      expect(
+        await SpeechCoachService.instance.listen(languageCode: language),
+        'spoken words',
+      );
+    }
+    expect(received, <String>[
+      'en-GB',
+      'es-MX',
+      'ar-EG',
+      'pt-BR',
+      'zh-Hant-TW',
+      'en-US',
+    ]);
   });
 
   test('times out stalled native recognizer and requests stop', () async {

@@ -54,7 +54,75 @@ class SpeechCoachService {
   }
 
   String _localeFor(String languageCode) {
-    final code = languageCode.toLowerCase().split(RegExp('[-_]')).first;
+    final parts = languageCode.trim().replaceAll('_', '-').split('-');
+    final code = parts.first.toLowerCase();
+    // Preserve an explicit BCP-47 regional dialect. Defaulting en-GB to
+    // en-US or ar-EG to ar-SA changes the recognizer acoustic language and
+    // can unfairly lower a learner's speaking score.
+    final validLanguage = RegExp(r'^[a-zA-Z]{2,3}
+      'ar': 'ar-SA',
+      'en': 'en-US',
+      'de': 'de-DE',
+      'fr': 'fr-FR',
+      'es': 'es-ES',
+      'it': 'it-IT',
+      'pt': 'pt-PT',
+      'ru': 'ru-RU',
+      'tr': 'tr-TR',
+      'ja': 'ja-JP',
+      'ko': 'ko-KR',
+      'zh': 'zh-CN',
+    };
+    return locales[code] ?? code;
+  }
+}
+).hasMatch(code);
+    final validRegion = RegExp(r'^(?:[a-zA-Z]{2}|[0-9]{3})
+      'ar': 'ar-SA',
+      'en': 'en-US',
+      'de': 'de-DE',
+      'fr': 'fr-FR',
+      'es': 'es-ES',
+      'it': 'it-IT',
+      'pt': 'pt-PT',
+      'ru': 'ru-RU',
+      'tr': 'tr-TR',
+      'ja': 'ja-JP',
+      'ko': 'ko-KR',
+      'zh': 'zh-CN',
+    };
+    return locales[code] ?? code;
+  }
+}
+);
+    if (validLanguage && parts.length == 2 &&
+        validRegion.hasMatch(parts[1])) {
+      return '$code-${parts[1].toUpperCase()}';
+    }
+    final validScript = RegExp(r'^[a-zA-Z]{4}
+      'ar': 'ar-SA',
+      'en': 'en-US',
+      'de': 'de-DE',
+      'fr': 'fr-FR',
+      'es': 'es-ES',
+      'it': 'it-IT',
+      'pt': 'pt-PT',
+      'ru': 'ru-RU',
+      'tr': 'tr-TR',
+      'ja': 'ja-JP',
+      'ko': 'ko-KR',
+      'zh': 'zh-CN',
+    };
+    return locales[code] ?? code;
+  }
+}
+);
+    if (validLanguage && parts.length == 3 &&
+        validScript.hasMatch(parts[1]) &&
+        validRegion.hasMatch(parts[2])) {
+      final script = '${parts[1][0].toUpperCase()}${parts[1].substring(1).toLowerCase()}';
+      return '$code-$script-${parts[2].toUpperCase()}';
+    }
     const locales = <String, String>{
       'ar': 'ar-SA',
       'en': 'en-US',
