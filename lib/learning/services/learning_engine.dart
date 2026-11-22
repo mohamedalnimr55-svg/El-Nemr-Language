@@ -2,6 +2,48 @@ import 'dart:math';
 import '../models/learning_models.dart';
 import 'learning_text_tokenizer.dart';
 
+/// Cached max-end index for a start-sorted, immutable subtitle timeline.
+///
+/// A plain backward scan has O(n) cost in subtitle gaps and with a long cue
+/// overlapping thousands of short captions. The tree finds the most recently
+/// started still-active cue in O(log n), even for overlapping subtitles.
+class _TimelineEndIndex {
+  _TimelineEndIndex._(this.capacity, this._maxEndMicros);
+
+  final int capacity;
+  final List<int> _maxEndMicros;
+  static const int _emptyEnd = -9223372036854775807;
+
+  factory _TimelineEndIndex.build(List<LearningSegment> segments) {
+    var capacity = 1;
+    while (capacity < segments.length) {
+      capacity *= 2;
+    }
+    final maxEnd = List<int>.filled(capacity * 2, _emptyEnd);
+    for (var i = 0; i < segments.length; i++) {
+      maxEnd[capacity + i] = segments[i].end.inMicroseconds;
+    }
+    for (var node = capacity - 1; node > 0; node--) {
+      maxEnd[node] = max(maxEnd[node * 2], maxEnd[node * 2 + 1]);
+    }
+    return _TimelineEndIndex._(capacity, maxEnd);
+  }
+
+  int lastActiveBefore(int exclusiveUpperBound, int timeMicros) =>
+      _find(1, 0, capacity, exclusiveUpperBound, timeMicros);
+
+  int _find(int node, int start, int end, int bound, int timeMicros) {
+    if (start >= bound || _maxEndMicros[node] <= timeMicros) return -1;
+    if (end - start == 1) return start;
+    final mid = (start + end) >> 1;
+    // Searching right first preserves the original most-recent-start rule.
+    final newer = _find(node * 2 + 1, mid, end, bound, timeMicros);
+    return newer >= 0
+        ? newer
+        : _find(node * 2, start, mid, bound, timeMicros);
+  }
+}
+
 class AnswerScore {
   const AnswerScore({
     required this.score,
@@ -36,15 +78,18 @@ class LearningEngine {
 
   LearningEngine({Random? random}) : _random = random ?? Random();
   final Random _random;
+  // Weak keys avoid retaining old videos' timeline lists after they are
+  // replaced. Segment timelines must be immutable; subtitle replacements
+  // pass a fresh list, as segmentsFromCues() guarantees.
+  final Expando<_TimelineEndIndex> _timelineIndices =
+      Expando<_TimelineEndIndex>('learning-active-cue-index');
 
-  // Timelines are sorted by start time, but subtitles may overlap (for
-  // example two speakers or a long caption with a shorter interjection).
-  // Binary-searching by BOTH start and end incorrectly discarded an earlier
-  // active cue whenever a later, shorter cue had already ended.
+  /// Expects an immutable list sorted by start time. Captions may overlap.
   LearningSegment? segmentAt(List<LearningSegment> segments, Duration position) {
+    if (segments.isEmpty) return null;
     var lo = 0;
     var hi = segments.length;
-    // Find the first cue which starts strictly after the current position.
+    // Find the first cue starting strictly after the playback position.
     while (lo < hi) {
       final mid = (lo + hi) >> 1;
       if (segments[mid].start <= position) {
@@ -53,12 +98,13 @@ class LearningEngine {
         hi = mid;
       }
     }
-    // Prefer the most recently started active cue. Earlier, longer captions
-    // are still eligible if the newer one has already ended.
-    for (var i = lo - 1; i >= 0; i--) {
-      if (position < segments[i].end) return segments[i];
+    var index = _timelineIndices[segments];
+    if (index == null) {
+      index = _TimelineEndIndex.build(segments);
+      _timelineIndices[segments] = index;
     }
-    return null;
+    final active = index.lastActiveBefore(lo, position.inMicroseconds);
+    return active >= 0 ? segments[active] : null;
   }
 
   /// Dictation and target-language exercises expect spoken source dialogue.
