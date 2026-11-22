@@ -70,6 +70,37 @@ Bye
       expect(parseDialogueLine(cues.single.text).speaker, isNull);
     });
 
+    test('ASS speaker Name is retained for role-play without altering dialogue', () {
+      const source = '''[Script Info]
+Title: Role-play
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.20,0:00:03.40,Default,Sarah,0,0,0,,Hello, John!
+Dialogue: 0,0:00:04.20,0:00:05.40,Default,John,0,0,0,,Hi, Sarah!
+''';
+      final cues = SubtitleParser.parse(source, extension: 'ass');
+      expect(cues, hasLength(2));
+      final first = parseDialogueLine(cues.first.text);
+      final second = parseDialogueLine(cues.last.text);
+      expect(first.speaker, 'Sarah');
+      expect(first.text, 'Hello, John!');
+      expect(second.speaker, 'John');
+      expect(second.text, 'Hi, Sarah!');
+    });
+
+    test('ASS blank Name leaves text unmodified and invalid durations are ignored', () {
+      const source = '''[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Good morning
+Dialogue: 0,0:00:04.00,0:00:03.00,Default,Alice,0,0,0,,Bad timestamps
+''';
+      final cues = SubtitleParser.parse(source, extension: 'ass');
+      expect(cues, hasLength(1));
+      expect(cues.single.text, 'Good morning');
+      expect(parseDialogueLine(cues.single.text).speaker, isNull);
+    });
+
     test('parses ASS dialogue and removes override tags', () {
       const source = '''[Script Info]
 Title: Test
