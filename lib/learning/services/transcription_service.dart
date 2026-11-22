@@ -32,6 +32,19 @@ class TranscriptionService {
 
   static bool get isConfigured => true;
 
+  /// Whisper recognizes a base language code (for example, 'en', 'zh')
+  /// rather than the full locale used for the device speech recognizer.
+  static String whisperLanguage(String? languageHint) {
+    final input = languageHint?.trim().toLowerCase().replaceAll('_', '-') ?? '';
+    if (input.isEmpty || input == 'auto' || input == 'und') return 'auto';
+    // Accept language[-Script][-REGION], rejecting malformed locale hints
+    // such as 'not-a-language' instead of silently passing 'not' to Whisper.
+    final validTag = RegExp(
+      r'^[a-z]{2,3}(?:-[a-z]{4})?(?:-(?:[a-z]{2}|[0-9]{3}))?$',
+    );
+    if (!validTag.hasMatch(input)) return 'auto';
+    return input.split('-').first;
+  }
   static WhisperModel get _model => switch (
         const String.fromEnvironment('LEARNING_WHISPER_MODEL', defaultValue: 'base').toLowerCase()
       ) {
@@ -76,7 +89,7 @@ class TranscriptionService {
       final response = await whisper.transcribe(
         transcribeRequest: TranscribeRequest(
           audio: wavPath,
-          language: (languageHint == null || languageHint.trim().isEmpty) ? 'auto' : languageHint.trim().toLowerCase(),
+          language: whisperLanguage(languageHint),
           isTranslate: false,
           isNoTimestamps: false,
           splitOnWord: false,

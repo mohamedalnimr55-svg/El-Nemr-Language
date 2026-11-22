@@ -13,6 +13,8 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
   List<VocabularyItem> _due = const [];
   bool _loading = true;
   bool _revealed = false;
+  bool _grading = false;
+  String? _gradeError;
 
   @override
   void initState() {
@@ -31,9 +33,22 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
   }
 
   Future<void> _grade(VocabularyGrade grade) async {
-    if (_due.isEmpty) return;
-    await VocabularyStore.review(_due.first.key, grade);
-    await _reload();
+    if (_due.isEmpty || !_revealed || _grading) return;
+    final key = _due.first.key;
+    // Lock synchronously, before the async persistence request. Rapid
+    // double taps must never advance a spaced-repetition card twice.
+    setState(() {
+      _grading = true;
+      _gradeError = null;
+    });
+    try {
+      await VocabularyStore.review(key, grade);
+      await _reload();
+    } catch (error) {
+      if (mounted) setState(() => _gradeError = 'Could not save review: $error');
+    } finally {
+      if (mounted) setState(() => _grading = false);
+    }
   }
 
   @override
@@ -76,6 +91,15 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
                       else
                         FilledButton.icon(onPressed: () => setState(() => _revealed = true), icon: const Icon(Icons.visibility_rounded), label: const Text('Reveal meaning')),
                       const Spacer(),
+                      if (_gradeError != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Text(
+                            _gradeError!,
+                            style: const TextStyle(color: Colors.redAccent),
+                          ),
+                        ),
+                      if (_grading) const LinearProgressIndicator(),
                       if (_revealed)
                         Row(
                           children: [
@@ -96,7 +120,7 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
 
   Widget _gradeButton(String label, VocabularyGrade grade, Color color) => OutlinedButton(
         style: OutlinedButton.styleFrom(foregroundColor: color, padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4)),
-        onPressed: () => _grade(grade),
+        onPressed: _grading ? null : () => _grade(grade),
         child: Text(label),
       );
 }
