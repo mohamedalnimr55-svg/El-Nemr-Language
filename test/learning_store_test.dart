@@ -62,6 +62,46 @@ void main() {
     expect(LearningProgressStore.matchesSegment(entry, original), isFalse);
   });
 
+  test('captured answer identity rejects current subtitles sharing the old ID',
+      () {
+    const captured = LearningSegment(
+      id: 'same-id',
+      start: Duration(seconds: 2),
+      end: Duration(seconds: 4),
+      original: 'Guten Morgen',
+      translation: 'Good morning',
+    );
+    const changedTranslation = LearningSegment(
+      id: 'same-id',
+      start: Duration(seconds: 2),
+      end: Duration(seconds: 4),
+      original: 'Guten Morgen',
+      translation: 'Hello there',
+    );
+    const changedText = LearningSegment(
+      id: 'same-id',
+      start: Duration(seconds: 2),
+      end: Duration(seconds: 4),
+      original: 'Guten Abend',
+      translation: 'Good morning',
+    );
+    const changedTiming = LearningSegment(
+      id: 'same-id',
+      start: Duration(seconds: 2),
+      end: Duration(seconds: 5),
+      original: 'Guten Morgen',
+      translation: 'Good morning',
+    );
+    expect(LearningProgressStore.sameSegmentIdentity(captured, captured),
+        isTrue);
+    expect(LearningProgressStore.sameSegmentIdentity(
+        captured, changedTranslation), isFalse);
+    expect(LearningProgressStore.sameSegmentIdentity(
+        captured, changedText), isFalse);
+    expect(LearningProgressStore.sameSegmentIdentity(
+        captured, changedTiming), isFalse);
+  });
+
   test('changing only subtitle translation resets adaptive score identity', () async {
     const original = LearningSegment(
       id: 'same-timing',
