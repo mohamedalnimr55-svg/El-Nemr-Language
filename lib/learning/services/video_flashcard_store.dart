@@ -86,14 +86,16 @@ class VideoFlashcardStore {
     await prefs.setString(_key(videoKey), jsonEncode(cards));
   });
 
-  /// Segment IDs contain start times and sequence indexes. Replacing a track
-  /// can reuse an ID for completely different speech. An old card must not be
-  /// shown, graded, or removed as though it belonged to the new subtitle.
+  /// Subtitle IDs can remain unchanged when the original or translated
+  /// track is replaced. An old card must never be reviewed, removed or
+  /// mistakenly graded against the changed dialogue.
   static bool matchesSegment(
     Map<String, dynamic>? card,
     LearningSegment segment,
   ) => card != null &&
+      card.containsKey('translation') &&
       card['original'] == segment.original &&
+      card['translation'] == segment.translation &&
       card['startMs'] == segment.start.inMilliseconds &&
       card['endMs'] == segment.end.inMilliseconds;
 
