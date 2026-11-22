@@ -88,6 +88,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   late bool _editLayout;
   late LearnerProfile _profile;
   bool _listening = false;
+  int _speechRequestId = 0;
   String? _speechError;
   bool _aiBusy = false;
   int _aiRequestId = 0;
@@ -110,17 +111,27 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       final currentId = _current?.id;
       final changed = currentId != _activeSegmentId;
       if (changed) {
-        // An in-flight AI answer for the previous line must never appear on
-        // the next subtitle, and should not keep the button disabled.
+        // Do not let in-flight AI or speech results leak into another scene.
         _aiRequestId++;
         _aiBusy = false;
+        _speechRequestId++;
+        if (_listening) {
+          unawaited(SpeechCoachService.instance.stop());
+          _listening = false;
+        }
         _activeSegmentId = currentId;
-        _question = null;
-        _answerRevealed = false;
-        _questionGraded = false;
-        _answer.clear();
-        _lastScore = null;
-        _lastAnswerScore = null;
+        // Review seeks to another subtitle *and* creates its quiz. Keep that
+        // question after the position ticker detects the new sentence.
+        final reviewQuestionAtDestination = _question?.segment.id == currentId;
+        if (!reviewQuestionAtDestination) {
+          _question = null;
+          _answerRevealed = false;
+          _questionGraded = false;
+          _answer.clear();
+          _lastScore = null;
+          _lastAnswerScore = null;
+        }
+        _lastSpeechAssessment = null;
         _speechError = null;
         _aiExplanation = null;
         _aiError = null;
@@ -132,6 +143,9 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   @override
   void dispose() {
     _positionTicker?.cancel();
+    _aiRequestId++;
+    _speechRequestId++;
+    if (_listening) unawaited(SpeechCoachService.instance.stop());
     _answer.dispose();
     super.dispose();
   }
@@ -821,8 +835,12 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   }
 
   Future<void> _listenAndFill(QuizQuestion question) async {
+    final requestId = ++_speechRequestId;
     widget.onPauseForSpeech();
     setState(() { _listening = true; _speechError = null; });
+    bool stillCurrent() => mounted && requestId == _speechRequestId &&
+        identical(_question, question) && _current?.id == question.segment.id &&
+        !_answerRevealed && !_questionGraded;
     try {
       // Translate-to-native answers are spoken in the learner's language,
       // not the video's original language.
@@ -832,24 +850,28 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         targetLanguage: _targetLanguage(),
       );
       final text = await SpeechCoachService.instance.listen(languageCode: language);
-      if (!mounted || !identical(_question, question) || _answerRevealed || _questionGraded) return;
+      if (!stillCurrent()) return;
       if (text != null) _answer.text = text;
     } catch (e) {
-      if (mounted) setState(() => _speechError = e.toString());
+      if (stillCurrent()) setState(() => _speechError = e.toString());
     } finally {
-      if (mounted) setState(() => _listening = false);
+      if (mounted && requestId == _speechRequestId) {
+        setState(() => _listening = false);
+      }
     }
   }
 
   Future<void> _listenAndScoreShadow(LearningSegment segment) async {
+    final requestId = ++_speechRequestId;
     widget.onPauseForSpeech();
     setState(() { _listening = true; _speechError = null; _lastScore = null; _lastAnswerScore = null; _lastSpeechAssessment = null; });
+    bool stillCurrent() => mounted && requestId == _speechRequestId &&
+        _current?.id == segment.id;
     try {
       // The time spent waiting for Android SpeechRecognizer is NOT the
       // learner's actual speaking duration. Do not report it as pace.
       final text = await SpeechCoachService.instance.listen(languageCode: _targetLanguage());
-      if (!mounted) return;
-      if (text == null) return;
+      if (!stillCurrent() || text == null) return;
       // Role-play speaker labels must not be scored as spoken words.
       final spokenLine = parseDialogueLine(segment.original).text;
       final detail = _engine.scoreDetailed(text, spokenLine);
@@ -864,6 +886,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         await VideoFlashcardStore.review(widget.videoKey, segment.id, score);
         await _loadFlashcards();
       }
+      if (!stillCurrent()) return;
       setState(() {
         _answer.text = text;
         _lastScore = score;
@@ -871,9 +894,11 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         _lastSpeechAssessment = assessment;
       });
     } catch (e) {
-      if (mounted) setState(() => _speechError = e.toString());
+      if (stillCurrent()) setState(() => _speechError = e.toString());
     } finally {
-      if (mounted) setState(() => _listening = false);
+      if (mounted && requestId == _speechRequestId) {
+        setState(() => _listening = false);
+      }
     }
   }
 
