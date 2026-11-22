@@ -187,14 +187,7 @@ class SubtitleParser {
   static Duration _vttClock(String? h, String m, String s, String ms) => Duration(hours: int.tryParse(h ?? '0') ?? 0, minutes: int.tryParse(m) ?? 0, seconds: int.tryParse(s) ?? 0, milliseconds: _millis(ms));
 
   static final RegExp _assTimestamp =
-      RegExp(r'^(\d{1,5}):([0-5]\d):([0-5]\d)\.(\d{1,2})
-
-  static int _millis(String value) {
-    final v = value.padRight(3, '0');
-    return int.tryParse(v.substring(0, 3)) ?? 0;
-  }
-}
-);
+      RegExp(r'^(\d{1,5}):([0-5]\d):([0-5]\d)\.(\d{1,2})$');
 
   // ASS/SSA timecodes use H:MM:SS.cc (centiseconds), unlike SRT/VTT.
   // Never coerce malformed fields to 00:00:00 or index missing components.
