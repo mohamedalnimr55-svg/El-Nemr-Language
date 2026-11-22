@@ -15,8 +15,10 @@ void main() {
       tester.view.resetDevicePixelRatio();
     });
     SharedPreferences.setMockInitialValues(<String, Object>{});
-    final expected = List<String>.generate(600, (i) => 'spoken$i').join(' ');
-    final entered = List<String>.generate(600, (i) => 'answer$i').join(' ');
+    // Keep the visible subtitle short so the quiz button is in the widget
+    // tree. Exercise the raw-input size guard with an enormous pasted answer.
+    const expected = 'A short spoken sentence';
+    final entered = List<String>.filled(16001, 'x').join();
     final segment = LearningSegment(
       id: 'long-dictation',
       start: const Duration(seconds: 1),
