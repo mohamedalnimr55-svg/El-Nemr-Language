@@ -111,7 +111,9 @@ class SubtitleParser {
       if (text.isEmpty) continue;
       final start = _assClock(fields[startIndex]);
       final end = _assClock(fields[endIndex]);
-      if (end <= start) continue;
+      // A corrupt timing field should discard this cue, not crash the
+      // entire ASS/SSA import and lose valid dialogue that follows it.
+      if (start == null || end == null || end <= start) continue;
       // ASS/SSA may carry the speaking character in the Name field.
       // Preserve it for Role Play, but never turn a blank or malformed
       // metadata value into spoken dialogue.
@@ -184,10 +186,29 @@ class SubtitleParser {
 
   static Duration _vttClock(String? h, String m, String s, String ms) => Duration(hours: int.tryParse(h ?? '0') ?? 0, minutes: int.tryParse(m) ?? 0, seconds: int.tryParse(s) ?? 0, milliseconds: _millis(ms));
 
-  static Duration _assClock(String value) {
-    final p = value.trim().split(':');
-    final sec = p.last.split('.');
-    return Duration(hours: int.tryParse(p.length > 2 ? p[p.length - 3] : '0') ?? 0, minutes: int.tryParse(p[p.length - 2]) ?? 0, seconds: int.tryParse(sec[0]) ?? 0, milliseconds: (int.tryParse(sec.length > 1 ? sec[1].padRight(2, '0').substring(0, 2) : '0') ?? 0) * 10);
+  static final RegExp _assTimestamp =
+      RegExp(r'^(\d{1,5}):([0-5]\d):([0-5]\d)\.(\d{1,2})
+
+  static int _millis(String value) {
+    final v = value.padRight(3, '0');
+    return int.tryParse(v.substring(0, 3)) ?? 0;
+  }
+}
+);
+
+  // ASS/SSA timecodes use H:MM:SS.cc (centiseconds), unlike SRT/VTT.
+  // Never coerce malformed fields to 00:00:00 or index missing components.
+  static Duration? _assClock(String value) {
+    final match = _assTimestamp.firstMatch(value.trim());
+    if (match == null) return null;
+    final hours = int.tryParse(match.group(1)!);
+    if (hours == null) return null;
+    return Duration(
+      hours: hours,
+      minutes: int.parse(match.group(2)!),
+      seconds: int.parse(match.group(3)!),
+      milliseconds: int.parse(match.group(4)!.padRight(2, '0')) * 10,
+    );
   }
 
   static int _millis(String value) {
