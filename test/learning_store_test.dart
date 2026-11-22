@@ -23,6 +23,61 @@ void main() {
     expect(loaded.level, 'B1');
   });
 
+  test('progress never marks replacement subtitle as already mastered', () async {
+    const original = LearningSegment(
+      id: 'seg_3000_0',
+      start: Duration(seconds: 3),
+      end: Duration(seconds: 5),
+      original: 'Original spoken dialogue',
+    );
+    const replacement = LearningSegment(
+      id: 'seg_3000_0',
+      start: Duration(seconds: 3),
+      end: Duration(seconds: 5),
+      original: 'A different spoken dialogue',
+    );
+    await LearningProgressStore.record('replacement-progress', original.id, 1,
+        segment: original);
+    var saved = await LearningProgressStore.load('replacement-progress');
+    var entry = Map<String, dynamic>.from(saved[original.id] as Map);
+    expect(LearningProgressStore.matchesSegment(entry, original), isTrue);
+    expect(LearningProgressStore.matchesSegment(entry, replacement), isFalse);
+    expect(entry['best'], 1);
+
+    await LearningProgressStore.record('replacement-progress', replacement.id,
+        0.2, segment: replacement);
+    saved = await LearningProgressStore.load('replacement-progress');
+    entry = Map<String, dynamic>.from(saved[replacement.id] as Map);
+    expect(LearningProgressStore.matchesSegment(entry, replacement), isTrue);
+    expect(entry['best'], 0.2);
+    expect(entry['attempts'], 1,
+        reason: 'Old line attempts must not transfer to new subtitles.');
+
+    await LearningProgressStore.record('replacement-progress', replacement.id,
+        0.8, segment: replacement);
+    saved = await LearningProgressStore.load('replacement-progress');
+    entry = Map<String, dynamic>.from(saved[replacement.id] as Map);
+    expect(entry['attempts'], 2);
+    expect(entry['best'], 0.8);
+    expect(LearningProgressStore.matchesSegment(entry, original), isFalse);
+  });
+
+  test('legacy progress without content signature is not applied to new cues',
+      () async {
+    await LearningProgressStore.record('legacy', 'same-id', 0.9);
+    final saved = await LearningProgressStore.load('legacy');
+    final entry = Map<String, dynamic>.from(saved['same-id'] as Map);
+    const segment = LearningSegment(
+      id: 'same-id',
+      start: Duration.zero,
+      end: Duration(seconds: 3),
+      original: 'New content at legacy index',
+    );
+    expect(LearningProgressStore.matchesSegment(entry, segment), isFalse);
+    expect(entry['best'], 0.9,
+        reason: 'Keep legacy records even when they cannot be re-associated.');
+  });
+
   test('subtitle layer settings persist without cue payload', () async {
     final layer = SubtitleLayer(
       id: 'layer1',
