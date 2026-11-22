@@ -1,0 +1,90 @@
+name: Android Emulator Cold Launch
+
+on:
+  pull_request:
+    branches: [full-native-build]
+    paths:
+      - 'lib/**'
+      - 'android/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'scripts/android_emulator_smoke.sh'
+      - '.github/workflows/android-emulator-smoke.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: emulator-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android-emulator-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out tested sources
+        uses: actions/checkout@v5
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: stable
+          cache: true
+
+      - name: Install native Android build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then SDKMANAGER="$(command -v sdkmanager)"; fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" \
+            'platforms;android-36' \
+            'build-tools;36.0.0' \
+            'ndk;28.2.13676358'
+
+      - name: Build Android x64 emulator APK
+        shell: bash
+        run: |
+          flutter pub get
+          flutter build apk --debug --no-pub --target-platform android-x64
+          test -s build/app/outputs/flutter-apk/app-debug.apk
+
+      - name: Enable KVM acceleration when available
+        shell: bash
+        run: |
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod 666 /dev/kvm
+            echo 'KVM acceleration enabled'
+          else
+            echo '::warning::KVM unavailable; emulator may run slowly'
+          fi
+
+      - name: Boot emulator and smoke-test native app launch
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-boot-timeout: 900
+          script: bash scripts/android_emulator_smoke.sh
+
+      - name: Upload emulator logcat and screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: El-Nemr-Language-Android-Emulator-Smoke
+          path: android-emulator-smoke-results/
+          if-no-files-found: warn
+          retention-days: 14
