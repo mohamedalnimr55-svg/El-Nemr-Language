@@ -62,6 +62,65 @@ void main() {
     expect(LearningProgressStore.matchesSegment(entry, original), isFalse);
   });
 
+  test('changing only subtitle translation resets adaptive score identity', () async {
+    const original = LearningSegment(
+      id: 'same-timing',
+      start: Duration(seconds: 2),
+      end: Duration(seconds: 4),
+      original: 'Guten Morgen',
+      translation: 'Good morning',
+    );
+    const retranslated = LearningSegment(
+      id: 'same-timing',
+      start: Duration(seconds: 2),
+      end: Duration(seconds: 4),
+      original: 'Guten Morgen',
+      translation: 'Good day',
+    );
+    await LearningProgressStore.record('translation-edit', original.id, 1.0,
+        segment: original);
+    var all = await LearningProgressStore.load('translation-edit');
+    var stored = Map<String, dynamic>.from(all[original.id] as Map);
+    expect(LearningProgressStore.matchesSegment(stored, original), isTrue);
+    expect(LearningProgressStore.matchesSegment(stored, retranslated), isFalse);
+    expect(stored['best'], 1.0, reason: 'Retain old scores in storage');
+
+    await LearningProgressStore.record(
+        'translation-edit', retranslated.id, 0.3, segment: retranslated);
+    all = await LearningProgressStore.load('translation-edit');
+    stored = Map<String, dynamic>.from(all[retranslated.id] as Map);
+    expect(LearningProgressStore.matchesSegment(stored, retranslated), isTrue);
+    expect(LearningProgressStore.matchesSegment(stored, original), isFalse);
+    expect(stored['translation'], 'Good day');
+    expect(stored['attempts'], 1);
+    expect(stored['best'], 0.3);
+  });
+
+  test('adding a new translation invalidates scores for an un-translated line',
+      () async {
+    const without = LearningSegment(
+      id: 'translation-arrives',
+      start: Duration.zero,
+      end: Duration(seconds: 2),
+      original: 'Hola',
+    );
+    const withTranslation = LearningSegment(
+      id: 'translation-arrives',
+      start: Duration.zero,
+      end: Duration(seconds: 2),
+      original: 'Hola',
+      translation: 'Hello',
+    );
+    await LearningProgressStore.record(
+        'translation-arrives', without.id, 0.8, segment: without);
+    final all = await LearningProgressStore.load('translation-arrives');
+    final stored = Map<String, dynamic>.from(all[without.id] as Map);
+    expect(stored.containsKey('translation'), isTrue);
+    expect(LearningProgressStore.matchesSegment(stored, without), isTrue);
+    expect(LearningProgressStore.matchesSegment(stored, withTranslation),
+        isFalse);
+  });
+
   test('legacy progress without content signature is not applied to new cues',
       () async {
     await LearningProgressStore.record('legacy', 'same-id', 0.9);
@@ -169,6 +228,46 @@ void main() {
         hasLength(1));
     expect(await VideoFlashcardStore.toggle('replacement', replacement), isFalse);
     expect(await VideoFlashcardStore.load('replacement'), isEmpty);
+  });
+
+  test('translation edits never reuse the old video flashcard or its schedule',
+      () async {
+    const original = LearningSegment(
+      id: 'shared-id',
+      start: Duration(seconds: 1),
+      end: Duration(seconds: 3),
+      original: 'Bonjour',
+      translation: 'Hello',
+    );
+    const retranslated = LearningSegment(
+      id: 'shared-id',
+      start: Duration(seconds: 1),
+      end: Duration(seconds: 3),
+      original: 'Bonjour',
+      translation: 'Good day',
+    );
+    expect(await VideoFlashcardStore.toggle('translated-cards', original),
+        isTrue);
+    await VideoFlashcardStore.review('translated-cards', original.id, 1);
+    var cards = await VideoFlashcardStore.load('translated-cards');
+    expect(cards[original.id]?['repetitions'], 1);
+    expect(VideoFlashcardStore.matchesSegment(cards[original.id], original),
+        isTrue);
+    expect(VideoFlashcardStore.matchesSegment(
+        cards[retranslated.id], retranslated), isFalse);
+    expect(VideoFlashcardStore.dueForSegments(
+        cards, <LearningSegment>[retranslated]), isEmpty);
+
+    expect(await VideoFlashcardStore.toggle('translated-cards', retranslated),
+        isTrue, reason: 'Different translations must replace, not toggle off');
+    cards = await VideoFlashcardStore.load('translated-cards');
+    expect(cards, hasLength(1));
+    expect(cards[retranslated.id]?['translation'], 'Good day');
+    expect(cards[retranslated.id]?['repetitions'], 0);
+    expect(VideoFlashcardStore.matchesSegment(
+        cards[retranslated.id], retranslated), isTrue);
+    expect(VideoFlashcardStore.matchesSegment(cards[original.id], original),
+        isFalse);
   });
 
   test('parallel score writes keep all attempts and the best score', () async {
