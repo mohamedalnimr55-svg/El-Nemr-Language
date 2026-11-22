@@ -107,7 +107,7 @@ class SubtitleParser {
   static String _cleanVttCue(String value) {
     final raw = value.trimLeft();
     final voice = RegExp(
-      r'^<v(?:\\.[^ >]+)*\\s+([^>]+)>',
+      r'^<v(?:\.[^ >]+)*\s+([^>]+)>',
       caseSensitive: false,
     ).firstMatch(raw);
     final cleaned = _clean(value);
@@ -116,7 +116,7 @@ class SubtitleParser {
         speaker == null ||
         speaker.isEmpty ||
         speaker.length > 32 ||
-        speaker.contains(RegExp(r'[\\r\\n\\[\\]]'))) {
+        speaker.contains(RegExp(r'[\r\n\[\]]'))) {
       return cleaned;
     }
     return '[$speaker] $cleaned';
