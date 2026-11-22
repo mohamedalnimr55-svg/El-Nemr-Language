@@ -5,6 +5,7 @@ import '../models/learning_models.dart';
 import '../models/subtitle_layer.dart';
 import '../models/learner_profile.dart';
 import '../services/learning_engine.dart';
+import '../services/learning_progress_store.dart';
 import '../services/speech_coach_service.dart';
 import '../services/speech_assessment.dart';
 import '../services/ai_language_service.dart';
@@ -97,7 +98,11 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   Map<String, Map<String, dynamic>> _flashcards = <String, Map<String, dynamic>>{};
   final Set<String> _flashcardToggleBusy = <String>{};
   Timer? _positionTicker;
-  String? _activeSegmentId;
+  LearningSegment? _activeSegment;
+
+  static bool _sameSegment(LearningSegment? a, LearningSegment? b) =>
+      a == null ? b == null : b != null &&
+          LearningProgressStore.sameSegmentIdentity(a, b);
 
   @override
   void initState() {
@@ -106,11 +111,11 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     _editLayout = widget.editLayout;
     _profile = widget.profile;
     _loadFlashcards();
-    _activeSegmentId = _current?.id;
+    _activeSegment = _current;
     _positionTicker = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
-      final currentId = _current?.id;
-      final changed = currentId != _activeSegmentId;
+      final current = _current;
+      final changed = !_sameSegment(_activeSegment, current);
       if (changed) {
         // Do not let in-flight AI or speech results leak into another scene.
         _aiRequestId++;
@@ -120,10 +125,11 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
           unawaited(SpeechCoachService.instance.stop());
           _listening = false;
         }
-        _activeSegmentId = currentId;
+        _activeSegment = current;
         // Review seeks to another subtitle *and* creates its quiz. Keep that
         // question after the position ticker detects the new sentence.
-        final reviewQuestionAtDestination = _question?.segment.id == currentId;
+        final reviewQuestionAtDestination =
+            _sameSegment(_question?.segment, current);
         if (!reviewQuestionAtDestination) {
           _question = null;
           _answerRevealed = false;
@@ -813,7 +819,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     setState(() { _aiBusy = true; _aiError = null; _aiExplanation = null; });
     bool isCurrentRequest() => mounted &&
         _aiRequestId == requestId &&
-        _current?.id == segment.id;
+        _sameSegment(_current, segment);
 
     try {
       final index = widget.segments.indexWhere((e) => e.id == segment.id);
@@ -853,7 +859,8 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     widget.onPauseForSpeech();
     setState(() { _listening = true; _speechError = null; });
     bool stillCurrent() => mounted && requestId == _speechRequestId &&
-        identical(_question, question) && _current?.id == question.segment.id &&
+        identical(_question, question) &&
+        _sameSegment(_current, question.segment) &&
         !_answerRevealed && !_questionGraded;
     try {
       // Translate-to-native answers are spoken in the learner's language,
@@ -880,7 +887,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     widget.onPauseForSpeech();
     setState(() { _listening = true; _speechError = null; _lastScore = null; _lastAnswerScore = null; _lastSpeechAssessment = null; });
     bool stillCurrent() => mounted && requestId == _speechRequestId &&
-        _current?.id == segment.id;
+        _sameSegment(_current, segment);
     try {
       // The time spent waiting for Android SpeechRecognizer is NOT the
       // learner's actual speaking duration. Do not report it as pace.
@@ -931,7 +938,8 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
 
   void _grade() {
     final q = _question;
-    if (q == null || _answerRevealed || _questionGraded) return;
+    if (q == null || _answerRevealed || _questionGraded ||
+        !_sameSegment(_current, q.segment)) return;
     final detail = _engine.scoreDetailed(_answer.text, q.answer);
     final score = detail.score;
     // Commit the state before side effects. Multiple taps on Check (or
