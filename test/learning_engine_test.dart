@@ -44,9 +44,14 @@ void main() {
           original: 'two',
         ),
       ];
+      expect(engine.segmentAt(segments, Duration.zero), isNull,
+          reason: 'The first subtitle must not appear before its start time.');
       expect(engine.segmentAt(segments, const Duration(seconds: 2))?.id, 'a');
-      expect(engine.segmentAt(segments, const Duration(seconds: 3)), isNull);
+      expect(engine.segmentAt(segments, const Duration(seconds: 3)), isNull,
+          reason: 'A subtitle gap must not display the first spoken line.');
       expect(engine.segmentAt(segments, const Duration(seconds: 5))?.id, 'b');
+      expect(engine.segmentAt(segments, const Duration(seconds: 7)), isNull,
+          reason: 'The first subtitle must not reappear after the last cue.');
     });
 
     test('answer scoring is normalized and punctuation-insensitive', () {
