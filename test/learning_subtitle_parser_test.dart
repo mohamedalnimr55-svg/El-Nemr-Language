@@ -40,6 +40,20 @@ Bye
       expect(cues.last.text, 'Bye');
     });
 
+    test('SRT ignores styling-only subtitle cues', () {
+      const source = '''1
+00:00:01,000 --> 00:00:02,000
+<i></i>
+
+2
+00:00:03,000 --> 00:00:04,000
+Actual words
+''';
+      final cues = SubtitleParser.parse(source, extension: 'srt');
+      expect(cues, hasLength(1));
+      expect(cues.single.text, 'Actual words');
+    });
+
     test('WebVTT ignores NOTE, STYLE and REGION metadata blocks', () {
       const source = '''WEBVTT
 
