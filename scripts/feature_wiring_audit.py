@@ -47,7 +47,10 @@ forbid('lib/learning/models/learning_models.dart', r'shadow|rolePlay|smartCoach'
 need('lib/learning/widgets/learning_studio_sheet.dart', r'Immersion Auto', r'Smart Coach', r'Role Play', r'Shadow')
 
 # Long-term learning loop.
-need('lib/learning/widgets/learning_studio_sheet.dart', r'VocabularyStore', r'LocalLanguageCoach', r'SpeechAssessment')
+need('lib/learning/widgets/learning_studio_sheet.dart', r'VocabularyStore', r'LessonExplanationService\.explain', r'SpeechAssessment')
+# The widget delegates to LessonExplanationService, which actually selects
+# a configured AI gateway or the local offline fallback at runtime.
+need('lib/learning/services/lesson_explanation_service.dart', r'AiLanguageService\.explainSegment', r'LocalLanguageCoach\.explain')
 need('lib/learning/services/vocabulary_store.dart', r'VocabularyGrade', r'dueAt', r'intervalDays', r'ease')
 need('lib/screens/settings_screen.dart', r'Daily Review', r'No API key required', r'Optional online services')
 
