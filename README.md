@@ -35,7 +35,7 @@ TMDB, OpenSubtitles, SIMKL, and an OpenAI-compatible/self-hosted tutor endpoint 
 RC3 pins CI to **Flutter 3.44.9 / Dart 3.12.2**. This is intentional: the project SDK constraint is `^3.12.2`, and Flutter 3.47.x currently has a confirmed Android `AccessibilityBridge` class-verification launch regression on pre-API-34 devices for which the reported working workaround is 3.44.9. The pin should be revisited only after the upstream regression is fixed and device-smoke-tested.
 
 
-`.github/workflows/android.yml` runs three independent validation passes. Each pass resolves dependencies, audits the resolved package versions, runs release/feature audits, `flutter analyze`, the Flutter test suite, builds a signed release APK and AAB, verifies the APK signature, and uploads the generated `pubspec.lock` with the build artifacts.
+`.github/workflows/android.yml` validates the complete native Android project, resolves and audits dependencies, runs `flutter analyze` and the Flutter test suite, builds APK/AAB, checks APK identity/signature, and publishes both artifacts. A passing build is **not** a substitute for installing and testing on a real device.
 
 RC3 intentionally does **not** ship the stale RC2 `pubspec.lock`. The first real Flutter resolution generates a new lock, then `scripts/resolved_dependency_audit.py` gates the build before analyze/tests/build. This avoids presenting an unverified hand-edited lock as reproducible.
 
@@ -46,7 +46,7 @@ For persistent production signing, configure these GitHub secrets:
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-Without those secrets, CI creates an ephemeral non-debug validation key. Those APKs are installable for testing but should not be used as a long-term production signing identity.
+**PRs and non-main builds:** CI always creates an ephemeral non-debug validation key, even if production secrets exist. Those APKs are installable for testing but cannot reliably update an app signed by an earlier CI run. **Pushes to `main`:** all four signing secrets above are mandatory. The workflow fails closed if any secret is missing rather than silently shipping a release under a new signing identity. Keep the production keystore and passwords backed up securely; never add them to Git or share them in chat. See `RELEASE_SIGNING.md`.
 
 For optional signed iOS/TestFlight validation in `.github/workflows/ios.yml`, configure `IOS_CERT_BASE64`, `IOS_CERT_PASSWORD`, `IOS_PROFILE_BASE64`. The workflow validates the provisioning profile's team and `com.elnemr.language` application identifier, uses manual signing for Runner, verifies the signed app with `codesign`, and publishes an IPA checksum.
 
