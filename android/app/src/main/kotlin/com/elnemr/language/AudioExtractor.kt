@@ -52,7 +52,9 @@ class AudioExtractor(private val context: Context) {
             val inputFormat = track.second
             val mime = inputFormat.getString(MediaFormat.KEY_MIME) ?: error("Audio MIME type is missing")
             val decoder = MediaCodec.createDecoderByType(mime)
-            val output = File(context.cacheDir, "elnemr_audio_${System.currentTimeMillis()}.wav")
+            // A unique cache file avoids collisions if two videos transcribe
+            // concurrently, and failed decoding must never leak a partial WAV.
+            val output = File.createTempFile("elnemr_audio_", ".wav", context.cacheDir)
             try {
                 // Request a stable 16-bit PCM decoder output. Some codecs may
                 // still expose float PCM, which decodeToWav handles below.
@@ -60,11 +62,14 @@ class AudioExtractor(private val context: Context) {
                 decoder.configure(inputFormat, null, null, 0)
                 decoder.start()
                 decodeToWav(extractor, decoder, inputFormat, output)
+                return output
+            } catch (e: Exception) {
+                output.delete()
+                throw e
             } finally {
                 try { decoder.stop() } catch (_: Exception) {}
                 decoder.release()
             }
-            return output
         } finally {
             extractor.release()
         }
@@ -144,6 +149,10 @@ class AudioExtractor(private val context: Context) {
                     else -> if (outputIndex >= 0) {
                         val buffer = decoder.getOutputBuffer(outputIndex)
                         if (buffer != null && info.size > 0) {
+                            if (pcmEncoding != AudioFormat.ENCODING_PCM_16BIT &&
+                                pcmEncoding != AudioFormat.ENCODING_PCM_FLOAT) {
+                                error("Unsupported decoded PCM encoding $pcmEncoding; refusing corrupted WAV output")
+                            }
                             buffer.position(info.offset)
                             buffer.limit(info.offset + info.size)
                             buffer.order(ByteOrder.LITTLE_ENDIAN)
