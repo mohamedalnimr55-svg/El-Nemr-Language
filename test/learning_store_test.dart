@@ -55,6 +55,72 @@ void main() {
     expect(seg['last'], 0.9);
   });
 
+  test('stale flashcards do not hide valid due reviews after subtitle edits', () async {
+    const removed = LearningSegment(
+      id: 'removed-caption',
+      start: Duration(seconds: 1),
+      end: Duration(seconds: 2),
+      original: 'Old text',
+    );
+    const active = LearningSegment(
+      id: 'current-caption',
+      start: Duration(seconds: 3),
+      end: Duration(seconds: 4),
+      original: 'Current words',
+    );
+    await VideoFlashcardStore.toggle('video', removed);
+    await VideoFlashcardStore.toggle('video', active);
+    final cards = await VideoFlashcardStore.load('video');
+
+    final due = VideoFlashcardStore.dueForSegments(
+      cards,
+      <String>[active.id],
+    );
+    expect(due.map((e) => e.key), <String>[active.id]);
+    expect(cards.containsKey(removed.id), isTrue,
+        reason: 'Existing stored cards are preserved until explicitly deleted.');
+    final none = VideoFlashcardStore.dueForSegments(cards, <String>[]);
+    expect(none, isEmpty);
+  });
+
+  test('parallel score writes keep all attempts and the best score', () async {
+    final scores = List<double>.generate(40, (i) => (i + 1) / 40);
+    await Future.wait(scores.map(
+      (score) => LearningProgressStore.record('many', 'seg', score),
+    ));
+    final progress = await LearningProgressStore.load('many');
+    final saved = Map<String, dynamic>.from(progress['seg'] as Map);
+    expect(saved['attempts'], 40);
+    expect(saved['best'], 1.0);
+    expect(saved['last'], 1.0);
+  });
+
+  test('parallel flashcard toggles and reviews do not lose updates', () async {
+    final segments = List<LearningSegment>.generate(
+      20,
+      (i) => LearningSegment(
+        id: 'card-$i',
+        start: Duration(seconds: i),
+        end: Duration(seconds: i + 1),
+        original: 'Sentence $i',
+      ),
+    );
+    final toggled = await Future.wait(
+      segments.map((s) => VideoFlashcardStore.toggle('parallel', s)),
+    );
+    expect(toggled, everyElement(isTrue));
+    final saved = await VideoFlashcardStore.load('parallel');
+    expect(saved, hasLength(20));
+
+    await Future.wait(List.generate(
+      8,
+      (_) => VideoFlashcardStore.review('parallel', 'card-0', 1),
+    ));
+    final cards = await VideoFlashcardStore.load('parallel');
+    expect((cards['card-0']?['repetitions'] as num?)?.toInt(), 8);
+    expect(cards, hasLength(20));
+  });
+
   test('video flashcard toggles and schedules successful review', () async {
     const segment = LearningSegment(
       id: 'seg-card',
