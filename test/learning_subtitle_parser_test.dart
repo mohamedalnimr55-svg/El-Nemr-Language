@@ -40,6 +40,47 @@ Bye
       expect(cues.last.text, 'Bye');
     });
 
+    test('WebVTT ignores NOTE, STYLE and REGION metadata blocks', () {
+      const source = '''WEBVTT
+
+NOTE Not spoken dialogue
+00:00:01.000 --> 00:00:02.000
+This comment is not a subtitle.
+
+STYLE
+::cue { color: yellow; }
+00:00:03.000 --> 00:00:04.000
+Not dialogue either.
+
+REGION
+id:bottom
+00:00:05.000 --> 00:00:06.000
+Not spoken text.
+
+real-cue
+00:00:07.000 --> 00:00:08.000 align:start
+Actual dialogue
+''';
+      final cues = SubtitleParser.parse(source, extension: 'vtt');
+      expect(cues, hasLength(1));
+      expect(cues.single.start, const Duration(seconds: 7));
+      expect(cues.single.text, 'Actual dialogue');
+    });
+
+    test('SRT skips reversed-duration cues rather than creating broken lessons', () {
+      const source = '''1
+00:00:04,000 --> 00:00:03,000
+Reverse time
+
+2
+00:00:05,000 --> 00:00:06,000
+Real sentence
+''';
+      final cues = SubtitleParser.parse(source, extension: 'srt');
+      expect(cues, hasLength(1));
+      expect(cues.single.text, 'Real sentence');
+    });
+
     test('WebVTT speaker tags survive parsing for real role-play lines', () {
       const source = '''WEBVTT
 
