@@ -103,6 +103,10 @@ void main() {
     final release = Completer<void>();
     server.listen((request) async {
       request.response.contentLength = 2048;
+      // Flush a real byte so dart:io sends the Content-Length headers before
+      // the test deliberately pauses the body. flush() with no bytes may
+      // defer header transmission until after the server is released.
+      request.response.add(const <int>[65]);
       await request.response.flush();
       await release.future;
       try {
