@@ -109,6 +109,40 @@ void main() {
       expect(engine.scoreAnswer('I am home.', recognized), 1);
     });
 
+    test('speech recognition uses the language of the expected quiz answer', () {
+      const segment = LearningSegment(
+        id: 'speech',
+        start: Duration.zero,
+        end: Duration(seconds: 2),
+        original: 'How are you?',
+        translation: 'كيف حالك؟',
+      );
+      const nativeQuestion = QuizQuestion(
+        kind: QuizKind.translateToNative,
+        prompt: 'Translate',
+        answer: 'كيف حالك؟',
+        segment: segment,
+      );
+      const targetQuestion = QuizQuestion(
+        kind: QuizKind.dictation,
+        prompt: 'Dictate',
+        answer: 'How are you?',
+        segment: segment,
+      );
+      expect(
+        LearningEngine.answerLanguageForQuestion(
+          nativeQuestion, nativeLanguage: 'ar', targetLanguage: 'en',
+        ),
+        'ar',
+      );
+      expect(
+        LearningEngine.answerLanguageForQuestion(
+          targetQuestion, nativeLanguage: 'ar', targetLanguage: 'en',
+        ),
+        'en',
+      );
+    });
+
     test('answer scoring is normalized and punctuation-insensitive', () {
       final engine = LearningEngine(random: Random(1));
       expect(engine.scoreAnswer('Hello, WORLD!', 'hello world'), 1.0);

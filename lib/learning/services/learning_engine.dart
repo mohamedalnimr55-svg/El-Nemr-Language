@@ -43,6 +43,16 @@ class LearningEngine {
     return null;
   }
 
+  /// Dictation and target-language exercises expect spoken source dialogue.
+  /// Translation-to-native exercises expect the learner's own language.
+  static String answerLanguageForQuestion(
+    QuizQuestion question, {
+    required String nativeLanguage,
+    required String targetLanguage,
+  }) => question.kind == QuizKind.translateToNative
+      ? nativeLanguage
+      : targetLanguage;
+
   QuizQuestion questionFor(LearningSegment segment, {required LearningMode mode, String nativeLanguage = 'en'}) {
     // Speaker annotations belong in dialogue metadata/UI, not in the words
     // a learner must dictate, translate, or pronounce.

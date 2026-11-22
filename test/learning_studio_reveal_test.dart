@@ -56,11 +56,17 @@ void main() {
     ));
     await tester.pump();
 
-    await tester.ensureVisible(find.text('Quiz me'));
+    await tester.scrollUntilVisible(
+      find.text('Quiz me'), 160,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.text('Quiz me'));
     await tester.pump();
 
-    await tester.ensureVisible(find.text('Show answer'));
+    await tester.scrollUntilVisible(
+      find.text('Show answer'), 160,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.text('Show answer'));
     await tester.pump();
 
