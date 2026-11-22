@@ -5618,7 +5618,10 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   AdaptiveLearningDecision _smartCoachDecision(LearningSegment segment) {
     final raw = _learningProgress[segment.id];
-    final progress = raw is Map ? Map<String, dynamic>.from(raw) : const <String, dynamic>{};
+    final stored = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    final progress = LearningProgressStore.matchesSegment(stored, segment)
+        ? stored
+        : <String, dynamic>{};
     return AdaptiveLearningPolicy.decide(
       difficulty: segment.difficulty,
       bestScore: (progress['best'] as num?)?.toDouble(),
@@ -5667,7 +5670,16 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Future<void> _recordLearningScore(String segmentId, double score) async {
-    await LearningProgressStore.record(_learningKey, segmentId, score);
+    // A replaced subtitle may reuse the same timeline index and identifier.
+    // Attach the current spoken line to each new progress record.
+    final matching = _learningSegments.where((s) => s.id == segmentId);
+    if (matching.isEmpty) return;
+    await LearningProgressStore.record(
+      _learningKey,
+      segmentId,
+      score,
+      segment: matching.first,
+    );
     try { _learningProgress = await LearningProgressStore.load(_learningKey); } catch (_) {}
     if (_smartCoachEnabled) {
       _smartCoachSegmentId = null;

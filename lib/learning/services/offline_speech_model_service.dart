@@ -44,6 +44,19 @@ class OfflineSpeechModelService {
         _ => 'base',
       };
 
+  // Standard non-quantized ggml models are significantly larger than 1 MB.
+  // A previously interrupted download must not be marked ready simply
+  // because the file exists. Thresholds are conservative, not SHA checks.
+  static int get minimumExpectedModelBytes => switch (configuredModel) {
+        WhisperModel.tiny => 50 * 1024 * 1024,
+        WhisperModel.small => 300 * 1024 * 1024,
+        WhisperModel.medium => 950 * 1024 * 1024,
+        _ => 100 * 1024 * 1024,
+      };
+
+  static bool isPlausibleModelSize(int bytes) =>
+      bytes >= minimumExpectedModelBytes;
+
   static String get modelLabel => switch (configuredModel) {
         WhisperModel.tiny => 'Tiny · ~75 MB',
         WhisperModel.small => 'Small · ~466 MB',
@@ -64,7 +77,7 @@ class OfflineSpeechModelService {
     final savedModel = prefs.getString(_savedModelKey);
     if (savedModel == _modelSlug && saved != null && saved.isNotEmpty) {
       final file = File(saved);
-      if (await file.exists() && await file.length() > 1024 * 1024) {
+      if (await file.exists() && isPlausibleModelSize(await file.length())) {
         return OfflineSpeechModelStatus(
           ready: true,
           modelLabel: modelLabel,
@@ -81,7 +94,7 @@ class OfflineSpeechModelService {
     await for (final entry in dir.list()) {
       if (entry is! File) continue;
       if (entry.uri.pathSegments.last.toLowerCase() != expectedName) continue;
-      if (await entry.length() <= 1024 * 1024) continue;
+      if (!isPlausibleModelSize(await entry.length())) continue;
       await prefs.setString(_savedPathKey, entry.path);
       await prefs.setString(_savedModelKey, _modelSlug);
       return OfflineSpeechModelStatus(
@@ -116,6 +129,11 @@ class OfflineSpeechModelService {
     final resolved = File(downloaded);
     if (!await resolved.exists()) {
       throw const FileSystemException('Whisper model download completed but the model file was not found.');
+    }
+    if (!isPlausibleModelSize(await resolved.length())) {
+      throw const FileSystemException(
+        'Whisper model download is incomplete or truncated. Retry model preparation.',
+      );
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_savedPathKey, resolved.path);
