@@ -39,9 +39,13 @@ class SubtitleLayer {
     _maxCueDurationMs = null;
   }
 
-  static List<SubtitleCue> _orderedCues(List<SubtitleCue> value) =>
-      List<SubtitleCue>.of(value)
-        ..sort((a, b) => a.start.compareTo(b.start));
+  static List<SubtitleCue> _orderedCues(List<SubtitleCue> value) {
+    final sorted = List<SubtitleCue>.of(value)
+      ..sort((a, b) => a.start.compareTo(b.start));
+    // An editable getter would bypass the setter's timeline/cache reset.
+    // Store an immutable snapshot on construction and every replacement.
+    return List<SubtitleCue>.unmodifiable(sorted);
+  }
 
   double x;
   double y;

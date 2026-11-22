@@ -64,6 +64,50 @@ void main() {
     expect(layer.textAt(const Duration(seconds: 6)), 'Later');
   });
 
+  test('published cues cannot be edited around timeline cache invalidation', () {
+    final layer = SubtitleLayer(
+      id: 'immutable', label: 'Learning', source: 'first.srt',
+      language: 'en',
+      cues: const <SubtitleCue>[
+        SubtitleCue(
+          start: Duration(seconds: 2),
+          end: Duration(seconds: 4),
+          text: 'First',
+        ),
+      ],
+    );
+    // Populate internal cursor and maximum cue duration.
+    expect(layer.textAt(const Duration(seconds: 3)), 'First');
+    expect(() => layer.cues.clear(), throwsUnsupportedError);
+    expect(() => layer.cues.add(
+      const SubtitleCue(
+        start: Duration(seconds: 1),
+        end: Duration(seconds: 10),
+        text: 'Untracked edit',
+      ),
+    ), throwsUnsupportedError);
+    expect(layer.textAt(const Duration(seconds: 3)), 'First');
+
+    final provided = <SubtitleCue>[
+      const SubtitleCue(
+        start: Duration(seconds: 6),
+        end: Duration(seconds: 7),
+        text: 'Interjection',
+      ),
+      const SubtitleCue(
+        start: Duration(seconds: 1),
+        end: Duration(seconds: 11),
+        text: 'New long subtitle',
+      ),
+    ];
+    layer.cues = provided;
+    provided.clear();
+    expect(layer.cues, hasLength(2));
+    expect(() => layer.cues.removeAt(0), throwsUnsupportedError);
+    expect(layer.textAt(const Duration(seconds: 8)), 'New long subtitle');
+    expect(layer.textAt(const Duration(seconds: 6)), 'New long subtitle\\nInterjection');
+  });
+
   test('SubtitleLayer returns overlapping cues and applies independent delay', () {
     final layer = SubtitleLayer(
       id: 'x',
