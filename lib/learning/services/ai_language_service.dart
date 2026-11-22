@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/subtitle_cue.dart';
 import '../models/learning_models.dart';
@@ -22,11 +25,82 @@ class AiLanguageException implements Exception {
 class AiLanguageService {
   const AiLanguageService._();
 
-  static const String endpoint = String.fromEnvironment('LEARNING_LLM_ENDPOINT');
+  /// A chat-completions response should be small; a misbehaving gateway
+  /// must not consume unbounded device memory before JSON validation.
+  static const int maxResponseBytes = 1024 * 1024;
+
+  static const String _endpointPreferenceKey = 'learning.llm.endpoint';
+  static const String _modelPreferenceKey = 'learning.llm.model';
+  static const String _buildEndpoint = String.fromEnvironment('LEARNING_LLM_ENDPOINT');
   static const String apiKey = String.fromEnvironment('LEARNING_LLM_API_KEY');
-  static const String model = String.fromEnvironment('LEARNING_LLM_MODEL', defaultValue: 'gpt-4o-mini');
+  static const String _buildModel = String.fromEnvironment('LEARNING_LLM_MODEL', defaultValue: 'gpt-4o-mini');
+
+  static String? _runtimeEndpoint;
+  static String? _runtimeModel;
+  static String get model => _runtimeModel ?? _buildModel;
+
+  /// A user-supplied gateway can be configured after installing the APK.
+  /// No API keys are persisted; credentialed gateways should issue short-lived
+  /// tokens through a trusted backend rather than ship secrets in the client.
+  static String get endpoint => _runtimeEndpoint ?? _buildEndpoint;
 
   static bool get isConfigured => endpoint.trim().isNotEmpty;
+
+  static Future<void> loadConfiguration() async {
+    final prefs = await SharedPreferences.getInstance();
+    _runtimeEndpoint = prefs.getString(_endpointPreferenceKey);
+    _runtimeModel = prefs.getString(_modelPreferenceKey);
+  }
+
+  static Future<void> setEndpoint(String value) async {
+    final normalized = value.trim();
+    if (normalized.isNotEmpty) _validateEndpoint(normalized);
+    final prefs = await SharedPreferences.getInstance();
+    if (normalized.isEmpty) {
+      await prefs.remove(_endpointPreferenceKey);
+      _runtimeEndpoint = null;
+    } else {
+      await prefs.setString(_endpointPreferenceKey, normalized);
+      _runtimeEndpoint = normalized;
+    }
+  }
+
+  static Future<void> setModel(String value) async {
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      throw const AiLanguageException('AI model name cannot be empty.');
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_modelPreferenceKey, normalized);
+    _runtimeModel = normalized;
+  }
+
+  static Uri _validateEndpoint(String value) {
+    final uri = Uri.tryParse(value);
+    if (uri == null ||
+        (uri.scheme != 'https' && uri.scheme != 'http') ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.fragment.isNotEmpty) {
+      throw const AiLanguageException(
+        'Enter a complete HTTP(S) chat-completions URL without credentials or a fragment.',
+      );
+    }
+    return uri;
+  }
+
+  /// Performs an actual chat-completions round trip, not a UI-only readiness
+  /// check. The caller should display any connection/configuration error.
+  static Future<String> testConnection() async {
+    if (!isConfigured) {
+      throw const AiLanguageException('Configure an AI endpoint before testing the connection.');
+    }
+    return await _chat(
+      system: 'You are a language-learning service health check.',
+      user: 'Reply READY.',
+      temperature: 0,
+    );
+  }
 
   static Future<List<SubtitleCue>> translateCues(
     List<SubtitleCue> cues, {
@@ -89,8 +163,8 @@ Explain the useful vocabulary, natural meaning, grammar only when helpful, conne
     required String user,
     required double temperature,
   }) async {
-    final uri = Uri.tryParse(endpoint);
-    if (uri == null || !uri.hasScheme) throw const AiLanguageException('LEARNING_LLM_ENDPOINT is invalid.');
+    if (!isConfigured) throw const AiLanguageException('AI Tutor endpoint is not configured.');
+    final uri = _validateEndpoint(endpoint);
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 20)
       ..idleTimeout = const Duration(seconds: 60);
@@ -108,7 +182,8 @@ Explain the useful vocabulary, natural meaning, grammar only when helpful, conne
         ],
       }));
       final response = await request.close().timeout(const Duration(minutes: 2));
-      final body = await response.transform(utf8.decoder).join();
+      final body = await _readBoundedResponse(response)
+          .timeout(const Duration(minutes: 2));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw AiLanguageException(_errorMessage(response.statusCode, body));
       }
@@ -133,6 +208,26 @@ Explain the useful vocabulary, natural meaning, grammar only when helpful, conne
     }
   }
 
+  static Future<String> _readBoundedResponse(HttpClientResponse response) async {
+    if (response.contentLength > maxResponseBytes) {
+      throw const AiLanguageException(
+        'AI provider response is too large. The answer was not loaded.',
+      );
+    }
+    final bytes = BytesBuilder(copy: false);
+    var received = 0;
+    await for (final chunk in response) {
+      received += chunk.length;
+      if (received > maxResponseBytes) {
+        throw const AiLanguageException(
+          'AI provider response is too large. The answer was not loaded.',
+        );
+      }
+      bytes.add(chunk);
+    }
+    return utf8.decode(bytes.takeBytes());
+  }
+
   static List<String> _jsonArrayFromText(String value) {
     final start = value.indexOf('[');
     final end = value.lastIndexOf(']');
@@ -140,7 +235,20 @@ Explain the useful vocabulary, natural meaning, grammar only when helpful, conne
     try {
       final decoded = jsonDecode(value.substring(start, end + 1));
       if (decoded is! List) throw const FormatException();
-      return decoded.map((e) => e?.toString().trim() ?? '').toList(growable: false);
+      // Fail closed: malformed AI responses must not be silently converted
+      // into subtitles containing "null", numeric values, or empty text.
+      final items = <String>[];
+      for (final item in decoded) {
+        if (item is! String || item.trim().isEmpty) {
+          throw const AiLanguageException(
+            'Translation provider returned a non-text or empty subtitle.',
+          );
+        }
+        items.add(item.trim());
+      }
+      return List<String>.unmodifiable(items);
+    } on AiLanguageException {
+      rethrow;
     } catch (_) {
       throw const AiLanguageException('Translation response contained malformed JSON.');
     }
