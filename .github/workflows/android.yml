@@ -156,11 +156,17 @@ jobs:
       - name: Flutter tests
         run: flutter test --no-pub
 
+      - name: Test bounded Android build retry
+        shell: bash
+        run: bash scripts/test_retry_android_build.sh
+
       - name: Build full native APK
-        run: flutter build apk --release --no-pub
+        shell: bash
+        run: bash scripts/retry_android_build.sh flutter build apk --release --no-pub
 
       - name: Build full native AAB
-        run: flutter build appbundle --release --no-pub
+        shell: bash
+        run: bash scripts/retry_android_build.sh flutter build appbundle --release --no-pub
 
       - name: Verify signed release artifacts and Android identity
         shell: bash
