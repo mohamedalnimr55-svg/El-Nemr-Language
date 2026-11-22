@@ -28,6 +28,84 @@ void main() {
       expect(segments.single.start, const Duration(seconds: 10));
     });
 
+    test('chooses largest translation overlap, not the first one', () {
+      const original = <SubtitleCue>[
+        SubtitleCue(
+          start: Duration(seconds: 10),
+          end: Duration(seconds: 13),
+          text: 'This is the actual spoken line',
+        ),
+      ];
+      const translated = <SubtitleCue>[
+        SubtitleCue(
+          start: Duration(seconds: 9),
+          end: Duration(seconds: 10, milliseconds: 30),
+          text: 'Wrong previous sentence',
+        ),
+        SubtitleCue(
+          start: Duration(seconds: 10, milliseconds: 100),
+          end: Duration(seconds: 12, milliseconds: 800),
+          text: 'Correct matching sentence',
+        ),
+      ];
+      final segments = segmentsFromCues(original, translation: translated);
+      expect(segments.single.translation, 'Correct matching sentence');
+    });
+
+    test('nearest translation fallback works for non-overlapping timed tracks', () {
+      const original = <SubtitleCue>[
+        SubtitleCue(
+          start: Duration(seconds: 10),
+          end: Duration(seconds: 12),
+          text: 'Current line',
+        ),
+      ];
+      const near = <SubtitleCue>[
+        SubtitleCue(
+          start: Duration(seconds: 12, milliseconds: 300),
+          end: Duration(seconds: 13),
+          text: 'Offset subtitle',
+        ),
+      ];
+      const far = <SubtitleCue>[
+        SubtitleCue(
+          start: Duration(seconds: 16),
+          end: Duration(seconds: 17),
+          text: 'Unrelated subtitle',
+        ),
+      ];
+      expect(segmentsFromCues(original, translation: near).single.translation,
+          'Offset subtitle');
+      expect(segmentsFromCues(original, translation: far).single.translation,
+          isNull);
+    });
+
+    test('tie in overlap prefers translation with closer start', () {
+      const original = <SubtitleCue>[
+        SubtitleCue(
+          start: Duration(seconds: 10),
+          end: Duration(seconds: 12),
+          text: 'Line to translate',
+        ),
+      ];
+      const translated = <SubtitleCue>[
+        SubtitleCue(
+          start: Duration(seconds: 9),
+          end: Duration(seconds: 11),
+          text: 'Earlier half',
+        ),
+        SubtitleCue(
+          start: Duration(seconds: 10),
+          end: Duration(seconds: 11),
+          text: 'Closer half',
+        ),
+      ];
+      expect(
+        segmentsFromCues(original, translation: translated).single.translation,
+        'Closer half',
+      );
+    });
+
     test('segmentAt performs exact boundary lookup', () {
       final engine = LearningEngine(random: Random(1));
       const segments = <LearningSegment>[

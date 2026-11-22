@@ -71,22 +71,36 @@ List<LearningSegment> segmentsFromCues(
 
 String? _translationNear(SubtitleCue cue, List<SubtitleCue> translated, int startIndex) {
   if (translated.isEmpty || startIndex >= translated.length) return null;
-  SubtitleCue? best;
-  var bestScore = 1 << 62;
+  SubtitleCue? bestOverlap;
+  var bestOverlapMs = 0;
+  var bestOverlapStartDistanceMs = 1 << 62;
+  SubtitleCue? nearest;
+  var nearestStartDistanceMs = 1 << 62;
   final maxTime = cue.end + const Duration(milliseconds: 2500);
   for (var i = startIndex; i < translated.length; i++) {
     final candidate = translated[i];
     if (candidate.start > maxTime) break;
     final overlapStart = candidate.start > cue.start ? candidate.start : cue.start;
     final overlapEnd = candidate.end < cue.end ? candidate.end : cue.end;
-    if (overlapEnd > overlapStart) return candidate.text;
-    final score = (candidate.start.inMilliseconds - cue.start.inMilliseconds).abs();
-    if (score < bestScore) {
-      bestScore = score;
-      best = candidate;
+    final overlapMs = (overlapEnd - overlapStart).inMilliseconds;
+    final distance = (candidate.start.inMilliseconds - cue.start.inMilliseconds).abs();
+    // A 1 ms overlap at the beginning of the cue should not win over a
+    // different translation that covers the majority of the spoken line.
+    if (overlapMs > bestOverlapMs ||
+        (overlapMs > 0 && overlapMs == bestOverlapMs &&
+            distance < bestOverlapStartDistanceMs)) {
+      bestOverlapMs = overlapMs;
+      bestOverlapStartDistanceMs = distance;
+      bestOverlap = candidate;
+    }
+    if (distance < nearestStartDistanceMs) {
+      nearestStartDistanceMs = distance;
+      nearest = candidate;
     }
   }
-  return bestScore <= 2500 ? best?.text : null;
+  if (bestOverlap != null) return bestOverlap.text;
+  // Preserve the existing conservative fallback for offset subtitle tracks.
+  return nearestStartDistanceMs <= 2500 ? nearest?.text : null;
 }
 
 double estimateLearningDifficulty(String text, Duration duration) {
