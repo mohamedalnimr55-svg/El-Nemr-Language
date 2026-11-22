@@ -177,7 +177,8 @@ Explain the useful vocabulary, natural meaning, grammar only when helpful, conne
         ],
       }));
       final response = await request.close().timeout(const Duration(minutes: 2));
-      final body = await response.transform(utf8.decoder).join();
+      final body = await response.transform(utf8.decoder).join()
+          .timeout(const Duration(minutes: 2));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw AiLanguageException(_errorMessage(response.statusCode, body));
       }
@@ -209,7 +210,20 @@ Explain the useful vocabulary, natural meaning, grammar only when helpful, conne
     try {
       final decoded = jsonDecode(value.substring(start, end + 1));
       if (decoded is! List) throw const FormatException();
-      return decoded.map((e) => e?.toString().trim() ?? '').toList(growable: false);
+      // Fail closed: malformed AI responses must not be silently converted
+      // into subtitles containing "null", numeric values, or empty text.
+      final items = <String>[];
+      for (final item in decoded) {
+        if (item is! String || item.trim().isEmpty) {
+          throw const AiLanguageException(
+            'Translation provider returned a non-text or empty subtitle.',
+          );
+        }
+        items.add(item.trim());
+      }
+      return List<String>.unmodifiable(items);
+    } on AiLanguageException {
+      rethrow;
     } catch (_) {
       throw const AiLanguageException('Translation response contained malformed JSON.');
     }
