@@ -175,6 +175,40 @@ Dialogue: 0,0:00:04.00,0:00:03.00,Default,Alice,0,0,0,,Bad timestamps
       expect(parseDialogueLine(cues.single.text).speaker, isNull);
     });
 
+    test('ASS skips corrupt timecodes and preserves later valid dialogue', () {
+      const source = '''[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,broken,0:00:02.00,Default,,0,0,0,,Broken start
+Dialogue: 0,0:00:01.00,missing,Default,,0,0,0,,Broken end
+Dialogue: 0,0:99:01.00,0:99:02.00,Default,,0,0,0,,Invalid minute
+Dialogue: 0,0:00:02.999,0:00:03.00,Default,,0,0,0,,Invalid precision
+Dialogue: 0,0:00:03.5,0:00:04.00,Default,,0,0,0,,Valid later line
+Dialogue: 0,0:00:01.20,0:00:02.30,Default,,0,0,0,,Valid earlier line
+''';
+      final cues = SubtitleParser.parse(source, extension: 'ass');
+      expect(cues, hasLength(2));
+      expect(cues.map((cue) => cue.text),
+          <String>['Valid earlier line', 'Valid later line']);
+      expect(cues.first.start, const Duration(milliseconds: 1200));
+      expect(cues.last.start, const Duration(milliseconds: 3500));
+    });
+
+    test('SSA rejects negative, incomplete and overflowed timecodes', () {
+      const source = '''[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,-0:00:01.00,0:00:02.00,Default,,0,0,0,,Negative time
+Dialogue: 0,0:00:60.00,0:01:02.00,Default,,0,0,0,,Invalid seconds
+Dialogue: 0,123456:00:01.00,123456:00:02.00,Default,,0,0,0,,Oversized hour field
+Dialogue: 0,0:00:00,0:00:03.00,Default,,0,0,0,,Missing centiseconds
+Dialogue: 0,0:00:05.07,0:00:06.09,Default,,0,0,0,,Surviving SSA subtitle
+''';
+      final cues = SubtitleParser.parse(source, extension: 'ssa');
+      expect(cues, hasLength(1));
+      expect(cues.single.text, 'Surviving SSA subtitle');
+      expect(cues.single.start, const Duration(seconds: 5, milliseconds: 70));
+      expect(cues.single.end, const Duration(seconds: 6, milliseconds: 90));
+    });
+
     test('parses ASS dialogue and removes override tags', () {
       const source = '''[Script Info]
 Title: Test
