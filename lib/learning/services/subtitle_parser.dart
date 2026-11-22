@@ -97,7 +97,7 @@ class SubtitleParser {
           : '';
       final validSpeaker = speaker.isNotEmpty &&
           speaker.length <= 32 &&
-          !speaker.contains(RegExp(r'[\\r\\n\\[\\]]'));
+          !speaker.contains(RegExp(r'[\r\n\[\]]'));
       final dialogue = validSpeaker && !text.startsWith('[$speaker]')
           ? '[$speaker] $text'
           : text;
