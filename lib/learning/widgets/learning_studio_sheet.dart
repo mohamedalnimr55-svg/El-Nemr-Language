@@ -259,8 +259,8 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
                 const SizedBox(height: 10),
               ],
               if (current == null)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
                   child: Text(
                     widget.segments.isEmpty
                         ? 'Add an original-language subtitle to create lessons and quizzes from this video.'
