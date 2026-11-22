@@ -74,13 +74,46 @@ void main() {
 
     final due = VideoFlashcardStore.dueForSegments(
       cards,
-      <String>[active.id],
+      <LearningSegment>[active],
     );
     expect(due.map((e) => e.key), <String>[active.id]);
     expect(cards.containsKey(removed.id), isTrue,
         reason: 'Existing stored cards are preserved until explicitly deleted.');
-    final none = VideoFlashcardStore.dueForSegments(cards, <String>[]);
+    final none = VideoFlashcardStore.dueForSegments(cards, <LearningSegment>[]);
     expect(none, isEmpty);
+  });
+
+  test('replacement captions do not hijack old cards with the same ID', () async {
+    const oldLine = LearningSegment(
+      id: 'seg_3000_0',
+      start: Duration(seconds: 3),
+      end: Duration(seconds: 5),
+      original: 'My original sentence',
+    );
+    const replacement = LearningSegment(
+      id: 'seg_3000_0',
+      start: Duration(seconds: 3),
+      end: Duration(seconds: 5),
+      original: 'A totally different subtitle',
+    );
+    expect(await VideoFlashcardStore.toggle('replacement', oldLine), isTrue);
+    var cards = await VideoFlashcardStore.load('replacement');
+    expect(VideoFlashcardStore.matchesSegment(cards[replacement.id], replacement), isFalse);
+    expect(VideoFlashcardStore.dueForSegments(cards, <LearningSegment>[replacement]),
+        isEmpty, reason: 'A shared timestamp and index do not prove shared dialogue.');
+    expect(VideoFlashcardStore.dueForSegments(cards, <LearningSegment>[oldLine]),
+        hasLength(1));
+
+    expect(await VideoFlashcardStore.toggle('replacement', replacement), isTrue,
+        reason: 'Saving a new sentence at an old ID must replace the stale card, not delete it.');
+    cards = await VideoFlashcardStore.load('replacement');
+    expect(cards, hasLength(1));
+    expect(cards[replacement.id]?['original'], replacement.original);
+    expect(VideoFlashcardStore.matchesSegment(cards[replacement.id], replacement), isTrue);
+    expect(VideoFlashcardStore.dueForSegments(cards, <LearningSegment>[replacement]),
+        hasLength(1));
+    expect(await VideoFlashcardStore.toggle('replacement', replacement), isFalse);
+    expect(await VideoFlashcardStore.load('replacement'), isEmpty);
   });
 
   test('parallel score writes keep all attempts and the best score', () async {

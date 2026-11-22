@@ -28,7 +28,7 @@ class VideoFlashcardStore {
       LearningWriteQueue.run<bool>(_key(videoKey), () async {
     final prefs = await SharedPreferences.getInstance();
     final cards = await load(videoKey);
-    if (cards.containsKey(segment.id)) {
+    if (matchesSegment(cards[segment.id], segment)) {
       cards.remove(segment.id);
       await prefs.setString(_key(videoKey), jsonEncode(cards));
       return false;
@@ -86,18 +86,34 @@ class VideoFlashcardStore {
     await prefs.setString(_key(videoKey), jsonEncode(cards));
   });
 
-  /// Only review flashcards still backed by a subtitle in the current video.
-  /// Stale cards can remain after subtitle replacement/removal; they should
-  /// not block a valid due card or inflate the user's review count.
+  /// Segment IDs contain start times and sequence indexes. Replacing a track
+  /// can reuse an ID for completely different speech. An old card must not be
+  /// shown, graded, or removed as though it belonged to the new subtitle.
+  static bool matchesSegment(
+    Map<String, dynamic>? card,
+    LearningSegment segment,
+  ) => card != null &&
+      card['original'] == segment.original &&
+      card['startMs'] == segment.start.inMilliseconds &&
+      card['endMs'] == segment.end.inMilliseconds;
+
+  /// Only schedule due cards whose *content* still matches a current subtitle.
+  /// Existing orphaned cards stay in storage until a user replaces/removes
+  /// them, instead of hijacking the new transcript's learning progress.
   static List<MapEntry<String, Map<String, dynamic>>> dueForSegments(
     Map<String, Map<String, dynamic>> cards,
-    Iterable<String> activeSegmentIds, {
+    Iterable<LearningSegment> activeSegments, {
     DateTime? now,
   }) {
-    final ids = activeSegmentIds.toSet();
-    return cards.entries
-        .where((entry) => ids.contains(entry.key) && isDue(entry.value, now: now))
-        .toList(growable: false);
+    final currentById = <String, LearningSegment>{
+      for (final segment in activeSegments) segment.id: segment,
+    };
+    return cards.entries.where((entry) {
+      final segment = currentById[entry.key];
+      return segment != null &&
+          matchesSegment(entry.value, segment) &&
+          isDue(entry.value, now: now);
+    }).toList(growable: false);
   }
 
   static bool isDue(Map<String, dynamic> card, {DateTime? now}) {

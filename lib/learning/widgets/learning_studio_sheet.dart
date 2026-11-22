@@ -307,9 +307,11 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
                     const SizedBox(width: 8),
                     Expanded(child: OutlinedButton.icon(onPressed: () => _newQuestion(current), icon: const Icon(Icons.quiz_outlined), label: const Text('Quiz me'))),
                     IconButton(
-                      tooltip: _flashcards.containsKey(current.id) ? 'Remove video flashcard' : 'Save video flashcard',
+                      tooltip: VideoFlashcardStore.matchesSegment(_flashcards[current.id], current)
+                          ? 'Remove video flashcard' : 'Save video flashcard',
                       onPressed: () => _toggleFlashcard(current),
-                      icon: Icon(_flashcards.containsKey(current.id) ? Icons.star : Icons.star_border, color: Colors.amberAccent),
+                      icon: Icon(VideoFlashcardStore.matchesSegment(_flashcards[current.id], current)
+                          ? Icons.star : Icons.star_border, color: Colors.amberAccent),
                     ),
                   ],
                 ),
@@ -762,7 +764,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   List<MapEntry<String, Map<String, dynamic>>> get _dueFlashcards =>
       VideoFlashcardStore.dueForSegments(
         _flashcards,
-        widget.segments.map((segment) => segment.id),
+        widget.segments,
       );
 
   Future<void> _loadFlashcards() async {
@@ -882,7 +884,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       );
       final score = assessment.overall;
       widget.onRecordScore(segment.id, score);
-      if (_flashcards.containsKey(segment.id)) {
+      if (VideoFlashcardStore.matchesSegment(_flashcards[segment.id], segment)) {
         await VideoFlashcardStore.review(widget.videoKey, segment.id, score);
         await _loadFlashcards();
       }
@@ -926,7 +928,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       _lastAnswerScore = detail;
     });
     widget.onRecordScore(q.segment.id, score);
-    if (_flashcards.containsKey(q.segment.id)) {
+    if (VideoFlashcardStore.matchesSegment(_flashcards[q.segment.id], q.segment)) {
       VideoFlashcardStore.review(widget.videoKey, q.segment.id, score).then((_) => _loadFlashcards());
     }
   }
