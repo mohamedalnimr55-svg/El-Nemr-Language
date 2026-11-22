@@ -3,7 +3,15 @@ name: Android Full Native Release
 on:
   push:
     branches: [full-native-build, main]
+  pull_request:
+    branches: [full-native-build]
   workflow_dispatch:
+
+# New commits supersede older PR checks, so only the newest source revision
+# is built and uploaded. Do not cancel an independent release on main.
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
