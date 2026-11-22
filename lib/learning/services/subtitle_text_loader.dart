@@ -28,7 +28,7 @@ class SubtitleTextLoader {
     final uri = Uri.tryParse(source);
     if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
       if (maxRemoteBytes <= 0) {
-        throw const ArgumentError('maxRemoteBytes must be positive');
+        throw ArgumentError('maxRemoteBytes must be positive');
       }
       final client = HttpClient();
       try {
