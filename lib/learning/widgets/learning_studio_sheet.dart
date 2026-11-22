@@ -10,7 +10,7 @@ import '../services/speech_assessment.dart';
 import '../services/ai_language_service.dart';
 import '../services/video_flashcard_store.dart';
 import '../services/on_device_translation_service.dart';
-import '../services/local_language_coach.dart';
+import '../services/lesson_explanation_service.dart';
 import '../services/vocabulary_store.dart';
 
 class LearningStudioSheet extends StatefulWidget {
@@ -79,6 +79,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   final LearningEngine _engine = LearningEngine();
   final TextEditingController _answer = TextEditingController();
   QuizQuestion? _question;
+  bool _answerRevealed = false;
   double? _lastScore;
   AnswerScore? _lastAnswerScore;
   SpeechAssessment? _lastSpeechAssessment;
@@ -88,6 +89,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   bool _listening = false;
   String? _speechError;
   bool _aiBusy = false;
+  int _aiRequestId = 0;
   String? _aiExplanation;
   String? _aiError;
   Map<String, Map<String, dynamic>> _flashcards = <String, Map<String, dynamic>>{};
@@ -107,8 +109,13 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       final currentId = _current?.id;
       final changed = currentId != _activeSegmentId;
       if (changed) {
+        // An in-flight AI answer for the previous line must never appear on
+        // the next subtitle, and should not keep the button disabled.
+        _aiRequestId++;
+        _aiBusy = false;
         _activeSegmentId = currentId;
         _question = null;
+        _answerRevealed = false;
         _answer.clear();
         _lastScore = null;
         _lastAnswerScore = null;
@@ -135,8 +142,11 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     }
   }
 
-  LearningSegment? get _current => _engine.segmentAt(widget.segments, _livePosition) ??
-      (widget.segments.isNotEmpty ? widget.segments.first : null);
+  // Do not surface the video's FIRST sentence when playback is in a gap
+  // between subtitle cues. That made quizzes/explanations target unrelated
+  // dialogue as soon as the movie moved off a captioned interval.
+  LearningSegment? get _current =>
+      _engine.segmentAt(widget.segments, _livePosition);
 
   @override
   Widget build(BuildContext context) {
@@ -147,11 +157,10 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         minChildSize: 0.42,
         maxChildSize: 0.94,
         expand: false,
-        builder: (context, scrollController) => DecoratedBox(
-          decoration: const BoxDecoration(
-            color: Color(0xFF121316),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
+        builder: (context, scrollController) => Material(
+          color: const Color(0xFF121316),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          clipBehavior: Clip.antiAlias,
           child: ListView(
             controller: scrollController,
             padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
@@ -256,9 +265,14 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
                 const SizedBox(height: 10),
               ],
               if (current == null)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Text('Add an original-language subtitle to create lessons and quizzes from this video.', style: TextStyle(color: Colors.white60)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Text(
+                    widget.segments.isEmpty
+                        ? 'Add an original-language subtitle to create lessons and quizzes from this video.'
+                        : 'No spoken line at the current playback position. Seek to a subtitled line to practise.',
+                    style: const TextStyle(color: Colors.white60),
+                  ),
                 )
               else ...[
                 const Text('Current learning segment', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
@@ -518,12 +532,23 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       TextField(controller: _answer, minLines: 1, maxLines: 4, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: 'اكتب إجابتك…', hintStyle: TextStyle(color: Colors.white38), border: OutlineInputBorder())),
       const SizedBox(height: 10),
       Row(children: [
-        FilledButton(onPressed: _grade, child: const Text('Check')),
+        FilledButton(
+          onPressed: _answerRevealed ? null : _grade,
+          child: Text(_answerRevealed ? 'Revealed · not graded' : 'Check'),
+        ),
         const SizedBox(width: 10),
-        TextButton(onPressed: () => setState(() { _answer.text = q.answer; _lastScore = null; _lastAnswerScore = null; }), child: const Text('Show answer')),
+        TextButton(
+          onPressed: _answerRevealed ? null : () => setState(() {
+            _answer.text = q.answer;
+            _answerRevealed = true;
+            _lastScore = null;
+            _lastAnswerScore = null;
+          }),
+          child: const Text('Show answer'),
+        ),
         IconButton(
           tooltip: 'Answer by voice',
-          onPressed: _listening ? null : () => _listenAndFill(q.segment),
+          onPressed: _listening || _answerRevealed ? null : () => _listenAndFill(q),
           icon: _listening
               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
               : const Icon(Icons.mic, color: Colors.lightBlueAccent),
@@ -580,8 +605,14 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
 
   Widget _levelPicker() => DropdownButtonFormField<String>(
     initialValue: const ['A1','A2','B1','B2','C1','C2'].contains(_profile.level) ? _profile.level : 'A2',
+    isExpanded: true,
     dropdownColor: const Color(0xFF25272C),
-    decoration: const InputDecoration(labelText: 'Level', isDense: true, border: OutlineInputBorder()),
+    decoration: const InputDecoration(
+      labelText: 'Level',
+      isDense: true,
+      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      border: OutlineInputBorder(),
+    ),
     items: [for (final level in const ['A1','A2','B1','B2','C1','C2']) DropdownMenuItem(value: level, child: Text(level, style: const TextStyle(color: Colors.white)))],
     onChanged: (v) { if (v != null) _setProfile(_profile.copyWith(level: v)); },
   );
@@ -676,15 +707,16 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _metricChip('Words', _lastSpeechAssessment!.wordAccuracy),
+            _metricChip('Recognized words', _lastSpeechAssessment!.wordAccuracy),
             _metricChip('Completeness', _lastSpeechAssessment!.completeness),
-            _metricChip('Pace', _lastSpeechAssessment!.pace),
+            if (_lastSpeechAssessment!.pace != null)
+              _metricChip('Pace', _lastSpeechAssessment!.pace!),
             _metricChip('Overall', _lastSpeechAssessment!.overall),
           ],
         ),
         const SizedBox(height: 6),
         const Text(
-          'Local word/timing feedback · not phoneme or accent scoring.',
+          'Speech-to-text word matching only. Speaking pace and accent are not measured here.',
           style: TextStyle(color: Colors.white38, fontSize: 11),
         ),
       ],
@@ -734,6 +766,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     widget.onSeek(segment.start);
     setState(() {
       _question = _engine.questionFor(segment, mode: LearningMode.test, nativeLanguage: _profile.nativeLanguage);
+      _answerRevealed = false;
       _answer.clear();
       _lastScore = null;
       _lastAnswerScore = null;
@@ -741,33 +774,35 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   }
 
   Future<void> _explainWithAi(LearningSegment segment) async {
+    final requestId = ++_aiRequestId;
     setState(() { _aiBusy = true; _aiError = null; _aiExplanation = null; });
+    bool isCurrentRequest() => mounted &&
+        _aiRequestId == requestId &&
+        _current?.id == segment.id;
+
     try {
-      String explanation;
-      if (AiLanguageService.isConfigured) {
-        final index = widget.segments.indexWhere((e) => e.id == segment.id);
-        final previous = index > 0 ? widget.segments[index - 1].original : null;
-        final next = index >= 0 && index + 1 < widget.segments.length ? widget.segments[index + 1].original : null;
-        explanation = await AiLanguageService.explainSegment(
-          segment: segment,
-          profile: _profile,
-          previous: previous,
-          next: next,
-        );
-      } else {
-        explanation = await LocalLanguageCoach.explain(
-          segment: segment,
-          profile: _profile,
-          sourceLanguage: _targetLanguage(),
-        );
+      final index = widget.segments.indexWhere((e) => e.id == segment.id);
+      final result = await LessonExplanationService.explain(
+        segment: segment,
+        profile: _profile,
+        sourceLanguage: _targetLanguage(),
+        previous: index > 0 ? widget.segments[index - 1].original : null,
+        next: index >= 0 && index + 1 < widget.segments.length
+            ? widget.segments[index + 1].original
+            : null,
+      );
+      if (isCurrentRequest()) {
+        setState(() {
+          _aiExplanation = result.text;
+          _aiError = result.warning;
+        });
       }
-      if (mounted) setState(() => _aiExplanation = explanation);
     } catch (e) {
-      if (mounted) {
-        setState(() => _aiError = 'Could not explain this scene locally: $e');
+      if (isCurrentRequest()) {
+        setState(() => _aiError = 'Could not explain this scene: $e');
       }
     } finally {
-      if (mounted) setState(() => _aiBusy = false);
+      if (isCurrentRequest()) setState(() => _aiBusy = false);
     }
   }
 
@@ -778,12 +813,19 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     return any.isNotEmpty ? any.first.language : _profile.targetLanguage;
   }
 
-  Future<void> _listenAndFill(LearningSegment segment) async {
+  Future<void> _listenAndFill(QuizQuestion question) async {
     widget.onPauseForSpeech();
     setState(() { _listening = true; _speechError = null; });
     try {
-      final text = await SpeechCoachService.instance.listen(languageCode: _targetLanguage());
-      if (!mounted) return;
+      // Translate-to-native answers are spoken in the learner's language,
+      // not the video's original language.
+      final language = LearningEngine.answerLanguageForQuestion(
+        question,
+        nativeLanguage: _profile.nativeLanguage,
+        targetLanguage: _targetLanguage(),
+      );
+      final text = await SpeechCoachService.instance.listen(languageCode: language);
+      if (!mounted || !identical(_question, question) || _answerRevealed) return;
       if (text != null) _answer.text = text;
     } catch (e) {
       if (mounted) setState(() => _speechError = e.toString());
@@ -796,17 +838,18 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     widget.onPauseForSpeech();
     setState(() { _listening = true; _speechError = null; _lastScore = null; _lastAnswerScore = null; _lastSpeechAssessment = null; });
     try {
-      final stopwatch = Stopwatch()..start();
+      // The time spent waiting for Android SpeechRecognizer is NOT the
+      // learner's actual speaking duration. Do not report it as pace.
       final text = await SpeechCoachService.instance.listen(languageCode: _targetLanguage());
-      stopwatch.stop();
       if (!mounted) return;
       if (text == null) return;
-      final detail = _engine.scoreDetailed(text, segment.original);
+      // Role-play speaker labels must not be scored as spoken words.
+      final spokenLine = parseDialogueLine(segment.original).text;
+      final detail = _engine.scoreDetailed(text, spokenLine);
       final assessment = assessSpeech(
         answer: detail,
-        expectedText: segment.original,
+        expectedText: spokenLine,
         expectedDuration: segment.duration,
-        speakingDuration: stopwatch.elapsed,
       );
       final score = assessment.overall;
       widget.onRecordScore(segment.id, score);
@@ -830,6 +873,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   void _newQuestion(LearningSegment segment) {
     setState(() {
       _question = _engine.questionFor(segment, mode: _mode, nativeLanguage: _profile.nativeLanguage);
+      _answerRevealed = false;
       _answer.clear();
       _lastScore = null;
       _lastAnswerScore = null;
@@ -838,7 +882,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
 
   void _grade() {
     final q = _question;
-    if (q == null) return;
+    if (q == null || _answerRevealed) return;
     final detail = _engine.scoreDetailed(_answer.text, q.answer);
     final score = detail.score;
     widget.onRecordScore(q.segment.id, score);
