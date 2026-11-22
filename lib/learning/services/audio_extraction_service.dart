@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -37,6 +38,7 @@ class AudioExtractionService {
     String source, {
     Map<String, String> httpHeaders = const {},
     bool allowSelfSigned = false,
+    Duration networkInactivityTimeout = const Duration(seconds: 30),
   }) async {
     final uri = Uri.tryParse(source);
     if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
@@ -53,9 +55,12 @@ class AudioExtractionService {
     }
 
     try {
-      final request = await client.getUrl(uri);
+      // A server can accept TCP but never send headers, or start streaming
+      // media and then stall indefinitely. Limit *inactivity* per stage,
+      // without imposing a total timeout on long legitimate videos.
+      final request = await client.getUrl(uri).timeout(networkInactivityTimeout);
       httpHeaders.forEach(request.headers.set);
-      final response = await request.close();
+      final response = await request.close().timeout(networkInactivityTimeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw AudioExtractionException(
           'Could not prepare protected media for offline transcription '
@@ -63,7 +68,13 @@ class AudioExtractionService {
         );
       }
       final sink = stagedFile.openWrite();
-      await response.pipe(sink);
+      try {
+        await response.timeout(networkInactivityTimeout).pipe(sink);
+      } finally {
+        // Close the file even after a timeout; otherwise Windows may refuse
+        // to remove the partial download from the temporary directory.
+        await sink.close();
+      }
       if (!await stagedFile.exists() || await stagedFile.length() == 0) {
         throw const AudioExtractionException(
           'Protected media staging produced an empty file.',
@@ -75,6 +86,11 @@ class AudioExtractionService {
         if (await tempDir.exists()) await tempDir.delete(recursive: true);
       } catch (_) {}
       if (e is AudioExtractionException) rethrow;
+      if (e is TimeoutException) {
+        throw const AudioExtractionException(
+          'Media download stopped responding. Check the connection or retry transcription.',
+        );
+      }
       throw AudioExtractionException('Could not prepare media for offline transcription: $e');
     } finally {
       client.close(force: true);
