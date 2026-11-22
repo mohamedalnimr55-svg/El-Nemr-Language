@@ -71,10 +71,106 @@ class LearningEngine {
       }
       return QuizQuestion(kind: QuizKind.translateToTarget, prompt: ar ? 'اكتب الجملة باللغة التي تتعلمها' : 'Write the line in the language you are learning', answer: spoken, segment: segment);
     }
-    final words = spoken.split(RegExp(r'\s+')).where((e) => e.length > 2).toList();
-    if (words.isNotEmpty) {
-      final word = words[_random.nextInt(words.length)];
-      return QuizQuestion(kind: QuizKind.fillBlank, prompt: spoken.replaceFirst(word, '_____'), answer: word, segment: segment);
+    // Use the same language-aware tokens as answer scoring. A whitespace
+    // split treats a whole Chinese/Japanese line as one "word", hiding
+    // everything and turning fill-in-the-blank into disguised dictation.
+    final scriptUnit = RegExp(
+      r'^[\u0E00-\u0EFF\u1000-\u109F\u1780-\u17FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]
+    return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته' : 'Type what you heard', answer: spoken, segment: segment);
+  }
+
+  double scoreAnswer(String answer, String expected) => scoreDetailed(answer, expected).score;
+
+  AnswerScore scoreDetailed(String answer, String expected) {
+    final actual = tokenizeLearningText(answer);
+    final target = tokenizeLearningText(expected);
+    if (target.isEmpty) {
+      return AnswerScore(
+        score: actual.isEmpty ? 1.0 : 0.0,
+        missingWords: const <String>[],
+        extraWords: List<String>.unmodifiable(actual),
+      );
+    }
+
+    final rows = actual.length + 1;
+    final cols = target.length + 1;
+    final d = List<List<int>>.generate(rows, (_) => List<int>.filled(cols, 0));
+    for (var i = 0; i < rows; i++) {
+      d[i][0] = i;
+    }
+    for (var j = 0; j < cols; j++) {
+      d[0][j] = j;
+    }
+    for (var i = 1; i < rows; i++) {
+      for (var j = 1; j < cols; j++) {
+        final substitution = d[i - 1][j - 1] + (actual[i - 1] == target[j - 1] ? 0 : 1);
+        d[i][j] = min(min(d[i - 1][j] + 1, d[i][j - 1] + 1), substitution);
+      }
+    }
+
+    final missing = <String>[];
+    final extra = <String>[];
+    var i = actual.length;
+    var j = target.length;
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && actual[i - 1] == target[j - 1] && d[i][j] == d[i - 1][j - 1]) {
+        i--; j--;
+        continue;
+      }
+      if (j > 0 && d[i][j] == d[i][j - 1] + 1) {
+        missing.add(target[j - 1]);
+        j--;
+        continue;
+      }
+      if (i > 0 && d[i][j] == d[i - 1][j] + 1) {
+        extra.add(actual[i - 1]);
+        i--;
+        continue;
+      }
+      if (i > 0 && j > 0) {
+        // A substitution is most useful to a learner when shown as both a
+        // missing expected word and an extra recognized/typed word.
+        missing.add(target[j - 1]);
+        extra.add(actual[i - 1]);
+        i--; j--;
+      } else if (j > 0) {
+        missing.add(target[--j]);
+      } else if (i > 0) {
+        extra.add(actual[--i]);
+      }
+    }
+    final orderedMissing = missing.reversed.toList(growable: false);
+    final orderedExtra = extra.reversed.toList(growable: false);
+    final distance = d[actual.length][target.length];
+    final denominator = max(actual.length, target.length);
+    return AnswerScore(
+      score: (1 - distance / denominator).clamp(0.0, 1.0).toDouble(),
+      missingWords: List<String>.unmodifiable(orderedMissing),
+      extraWords: List<String>.unmodifiable(orderedExtra),
+    );
+  }
+
+}
+,
+      unicode: true,
+    );
+    final lettersOrDigits = RegExp(r'[\p{L}\p{N}]', unicode: true);
+    final candidates = tokenizeLearningText(spoken)
+        .where((part) => lettersOrDigits.hasMatch(part) &&
+            (part.length > 2 || scriptUnit.hasMatch(part)))
+        .toList(growable: false);
+    if (candidates.isNotEmpty) {
+      final unit = candidates[_random.nextInt(candidates.length)];
+      final match = RegExp(RegExp.escape(unit), caseSensitive: false, unicode: true)
+          .firstMatch(spoken);
+      if (match != null) {
+        return QuizQuestion(
+          kind: QuizKind.fillBlank,
+          prompt: spoken.replaceRange(match.start, match.end, '_____'),
+          answer: match.group(0)!,
+          segment: segment,
+        );
+      }
     }
     return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته' : 'Type what you heard', answer: spoken, segment: segment);
   }

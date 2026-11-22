@@ -187,6 +187,52 @@ void main() {
       expect(engine.scoreAnswer('I am home.', recognized), 1);
     });
 
+    test('fill-blank quiz hides a character not a whole CJK sentence', () {
+      final engine = LearningEngine(random: Random(3));
+      for (final text in ['你好世界', 'こんにちは', '안녕하세요', 'สวัสดี']) {
+        final segment = LearningSegment(
+          id: text,
+          start: Duration.zero,
+          end: const Duration(seconds: 2),
+          original: text,
+        );
+        final question = engine.questionFor(segment, mode: LearningMode.test);
+        expect(question.kind, QuizKind.fillBlank, reason: text);
+        expect(question.answer, isNotEmpty);
+        expect(question.prompt, contains('_____'));
+        expect(question.prompt, isNot('_____'),
+            reason: 'The exercise must retain context around the gap.');
+        expect(question.prompt.replaceFirst('_____', question.answer), text);
+      }
+    });
+
+    test('cloze preserves casing and punctuation in Latin dialogue', () {
+      final engine = LearningEngine(random: Random(1));
+      const segment = LearningSegment(
+        id: 'punctuation',
+        start: Duration.zero,
+        end: Duration(seconds: 2),
+        original: 'Hello, WORLD!',
+      );
+      final question = engine.questionFor(segment, mode: LearningMode.test);
+      expect(question.kind, QuizKind.fillBlank);
+      expect(question.prompt, contains('_____'));
+      expect(question.prompt.replaceFirst('_____', question.answer),
+          segment.original);
+    });
+
+    test('symbol-only dialogue falls back to dictation rather than blanking all', () {
+      final engine = LearningEngine(random: Random(2));
+      const segment = LearningSegment(
+        id: 'symbols',
+        start: Duration.zero,
+        end: Duration(seconds: 2),
+        original: '🦊🦁',
+      );
+      final question = engine.questionFor(segment, mode: LearningMode.test);
+      expect(question.kind, QuizKind.dictation);
+    });
+
     test('speech recognition uses the language of the expected quiz answer', () {
       const segment = LearningSegment(
         id: 'speech',
