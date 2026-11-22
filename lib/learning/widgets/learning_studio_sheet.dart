@@ -79,6 +79,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   final LearningEngine _engine = LearningEngine();
   final TextEditingController _answer = TextEditingController();
   QuizQuestion? _question;
+  bool _answerRevealed = false;
   double? _lastScore;
   AnswerScore? _lastAnswerScore;
   SpeechAssessment? _lastSpeechAssessment;
@@ -114,6 +115,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         _aiBusy = false;
         _activeSegmentId = currentId;
         _question = null;
+        _answerRevealed = false;
         _answer.clear();
         _lastScore = null;
         _lastAnswerScore = null;
@@ -531,9 +533,20 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       TextField(controller: _answer, minLines: 1, maxLines: 4, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: 'اكتب إجابتك…', hintStyle: TextStyle(color: Colors.white38), border: OutlineInputBorder())),
       const SizedBox(height: 10),
       Row(children: [
-        FilledButton(onPressed: _grade, child: const Text('Check')),
+        FilledButton(
+          onPressed: _answerRevealed ? null : _grade,
+          child: Text(_answerRevealed ? 'Revealed · not graded' : 'Check'),
+        ),
         const SizedBox(width: 10),
-        TextButton(onPressed: () => setState(() { _answer.text = q.answer; _lastScore = null; _lastAnswerScore = null; }), child: const Text('Show answer')),
+        TextButton(
+          onPressed: _answerRevealed ? null : () => setState(() {
+            _answer.text = q.answer;
+            _answerRevealed = true;
+            _lastScore = null;
+            _lastAnswerScore = null;
+          }),
+          child: const Text('Show answer'),
+        ),
         IconButton(
           tooltip: 'Answer by voice',
           onPressed: _listening ? null : () => _listenAndFill(q.segment),
@@ -748,6 +761,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     widget.onSeek(segment.start);
     setState(() {
       _question = _engine.questionFor(segment, mode: LearningMode.test, nativeLanguage: _profile.nativeLanguage);
+      _answerRevealed = false;
       _answer.clear();
       _lastScore = null;
       _lastAnswerScore = null;
@@ -847,6 +861,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   void _newQuestion(LearningSegment segment) {
     setState(() {
       _question = _engine.questionFor(segment, mode: _mode, nativeLanguage: _profile.nativeLanguage);
+      _answerRevealed = false;
       _answer.clear();
       _lastScore = null;
       _lastAnswerScore = null;
@@ -855,7 +870,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
 
   void _grade() {
     final q = _question;
-    if (q == null) return;
+    if (q == null || _answerRevealed) return;
     final detail = _engine.scoreDetailed(_answer.text, q.answer);
     final score = detail.score;
     widget.onRecordScore(q.segment.id, score);
