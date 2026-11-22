@@ -105,7 +105,7 @@ void main() {
     expect(layer.cues, hasLength(2));
     expect(() => layer.cues.removeAt(0), throwsUnsupportedError);
     expect(layer.textAt(const Duration(seconds: 8)), 'New long subtitle');
-    expect(layer.textAt(const Duration(seconds: 6)), 'New long subtitle\\nInterjection');
+    expect(layer.textAt(const Duration(seconds: 6)), 'New long subtitle\nInterjection');
   });
 
   test('SubtitleLayer returns overlapping cues and applies independent delay', () {
