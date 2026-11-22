@@ -10,7 +10,7 @@ import '../services/speech_assessment.dart';
 import '../services/ai_language_service.dart';
 import '../services/video_flashcard_store.dart';
 import '../services/on_device_translation_service.dart';
-import '../services/local_language_coach.dart';
+import '../services/lesson_explanation_service.dart';
 import '../services/vocabulary_store.dart';
 
 class LearningStudioSheet extends StatefulWidget {
@@ -88,6 +88,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   bool _listening = false;
   String? _speechError;
   bool _aiBusy = false;
+  int _aiRequestId = 0;
   String? _aiExplanation;
   String? _aiError;
   Map<String, Map<String, dynamic>> _flashcards = <String, Map<String, dynamic>>{};
@@ -107,6 +108,10 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
       final currentId = _current?.id;
       final changed = currentId != _activeSegmentId;
       if (changed) {
+        // An in-flight AI answer for the previous line must never appear on
+        // the next subtitle, and should not keep the button disabled.
+        _aiRequestId++;
+        _aiBusy = false;
         _activeSegmentId = currentId;
         _question = null;
         _answer.clear();
@@ -750,35 +755,35 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   }
 
   Future<void> _explainWithAi(LearningSegment segment) async {
+    final requestId = ++_aiRequestId;
     setState(() { _aiBusy = true; _aiError = null; _aiExplanation = null; });
+    bool isCurrentRequest() => mounted &&
+        _aiRequestId == requestId &&
+        _current?.id == segment.id;
+
     try {
-      String explanation;
-      if (AiLanguageService.isConfigured) {
-        final index = widget.segments.indexWhere((e) => e.id == segment.id);
-        final previous = index > 0 ? widget.segments[index - 1].original : null;
-        final next = index >= 0 && index + 1 < widget.segments.length ? widget.segments[index + 1].original : null;
-        explanation = await AiLanguageService.explainSegment(
-          segment: segment,
-          profile: _profile,
-          previous: previous,
-          next: next,
-        );
-      } else {
-        explanation = await LocalLanguageCoach.explain(
-          segment: segment,
-          profile: _profile,
-          sourceLanguage: _targetLanguage(),
-        );
+      final index = widget.segments.indexWhere((e) => e.id == segment.id);
+      final result = await LessonExplanationService.explain(
+        segment: segment,
+        profile: _profile,
+        sourceLanguage: _targetLanguage(),
+        previous: index > 0 ? widget.segments[index - 1].original : null,
+        next: index >= 0 && index + 1 < widget.segments.length
+            ? widget.segments[index + 1].original
+            : null,
+      );
+      if (isCurrentRequest()) {
+        setState(() {
+          _aiExplanation = result.text;
+          _aiError = result.warning;
+        });
       }
-      if (mounted) setState(() => _aiExplanation = explanation);
     } catch (e) {
-      if (mounted) {
-        setState(() => _aiError = AiLanguageService.isConfigured
-            ? 'AI Tutor gateway failed: $e'
-            : 'Local Coach could not explain the scene: $e');
+      if (isCurrentRequest()) {
+        setState(() => _aiError = 'Could not explain this scene: $e');
       }
     } finally {
-      if (mounted) setState(() => _aiBusy = false);
+      if (isCurrentRequest()) setState(() => _aiBusy = false);
     }
   }
 
