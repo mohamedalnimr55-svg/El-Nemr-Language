@@ -30,7 +30,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: SizedBox(
-          height: 850,
+          height: 1600,
           child: LearningStudioSheet(
             layers: const [],
             segments: const <LearningSegment>[segment],
