@@ -322,6 +322,72 @@ void main() {
     expect(saved['last'], 1.0);
   });
 
+  test('queued review cannot grade a replacement flashcard with the same ID',
+      () async {
+    const old = LearningSegment(
+      id: 'same-card',
+      start: Duration(seconds: 3),
+      end: Duration(seconds: 5),
+      original: 'Bonjour',
+      translation: 'Hello',
+    );
+    const replacement = LearningSegment(
+      id: 'same-card',
+      start: Duration(seconds: 3),
+      end: Duration(seconds: 5),
+      original: 'Bonjour',
+      translation: 'Good day',
+    );
+    expect(await VideoFlashcardStore.toggle('review-race', old), isTrue);
+
+    // Queue the replacement first, then the delayed review associated with
+    // the old question. Checking only the card ID would incorrectly grade it.
+    final replacing = VideoFlashcardStore.toggle('review-race', replacement);
+    final staleReview = VideoFlashcardStore.review(
+      'review-race', old.id, 1.0, expectedSegment: old,
+    );
+    await replacing;
+    await staleReview;
+    var cards = await VideoFlashcardStore.load('review-race');
+    expect(cards[replacement.id]?['translation'], replacement.translation);
+    expect(cards[replacement.id]?['repetitions'], 0);
+    expect(cards[replacement.id]?['lastScore'], isNull);
+    expect(VideoFlashcardStore.isDue(cards[replacement.id]!), isTrue);
+
+    // The matching new question can be graded normally.
+    await VideoFlashcardStore.review(
+      'review-race', replacement.id, 1.0, expectedSegment: replacement,
+    );
+    cards = await VideoFlashcardStore.load('review-race');
+    expect(cards[replacement.id]?['repetitions'], 1);
+    expect(cards[replacement.id]?['lastScore'], 1.0);
+  });
+
+  test('queued review rejects replaced original dialogue and timing',
+      () async {
+    const old = LearningSegment(
+      id: 'same-time-index',
+      start: Duration(seconds: 2),
+      end: Duration(seconds: 4),
+      original: 'First sentence',
+    );
+    const newLine = LearningSegment(
+      id: 'same-time-index',
+      start: Duration(seconds: 2),
+      end: Duration(seconds: 4),
+      original: 'Second sentence',
+    );
+    await VideoFlashcardStore.toggle('review-original-change', old);
+    await VideoFlashcardStore.toggle('review-original-change', newLine);
+    await VideoFlashcardStore.review(
+      'review-original-change', old.id, 0.9, expectedSegment: old,
+    );
+    final saved = await VideoFlashcardStore.load('review-original-change');
+    expect(saved[newLine.id]?['original'], 'Second sentence');
+    expect(saved[newLine.id]?['repetitions'], 0);
+    expect(saved[newLine.id]?['lastScore'], isNull);
+  });
+
   test('parallel flashcard toggles and reviews do not lose updates', () async {
     final segments = List<LearningSegment>.generate(
       20,
