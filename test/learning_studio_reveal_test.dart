@@ -19,11 +19,13 @@ void main() {
     });
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final recordedScores = <double>[];
+    final recordedSegments = <LearningSegment>[];
     const segment = LearningSegment(
       id: 'spoken-1',
       start: Duration(seconds: 1),
       end: Duration(seconds: 6),
       original: 'Where are you going today?',
+      translation: '¿A dónde vas hoy?',
     );
     const currentPosition = Duration(seconds: 3);
 
@@ -43,7 +45,10 @@ void main() {
             onAddSubtitle: () {},
             onEditLayoutChanged: (_) {},
             editLayout: false,
-            onRecordScore: (_, score) => recordedScores.add(score),
+            onRecordScore: (captured, score) {
+              recordedSegments.add(captured);
+              recordedScores.add(score);
+            },
             onPauseForSpeech: () {},
             profile: const LearnerProfile(
               nativeLanguage: 'en',
@@ -91,6 +96,10 @@ void main() {
     await tester.pump();
 
     expect(recordedScores, hasLength(1));
+    expect(recordedSegments, hasLength(1));
+    expect(recordedSegments.single.id, segment.id);
+    expect(recordedSegments.single.original, segment.original);
+    expect(recordedSegments.single.translation, segment.translation);
     final graded = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Graded'),
     );
