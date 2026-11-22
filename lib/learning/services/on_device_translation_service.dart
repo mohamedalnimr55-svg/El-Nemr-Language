@@ -32,6 +32,18 @@ class OnDeviceTranslationService {
     return null;
   }
 
+  /// Reject failed native model outputs rather than silently saving a blank
+  /// translated subtitle (which would then break quizzes and vocabulary).
+  static String requireNonemptyTranslation(String value) {
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      throw const OnDeviceTranslationException(
+        'On-device translation returned empty text. Subtitle translation was not saved.',
+      );
+    }
+    return normalized;
+  }
+
   static bool canTranslate(String sourceLanguage, String targetLanguage) {
     if (!isAvailable) return false;
     final source = languageFor(sourceLanguage);
@@ -80,7 +92,10 @@ class OnDeviceTranslationService {
     );
     final translator = OnDeviceTranslator(sourceLanguage: source, targetLanguage: target);
     try {
-      return (await translator.translateText(text)).trim();
+      if (text.trim().isEmpty) return '';
+      return requireNonemptyTranslation(await translator.translateText(text));
+    } on OnDeviceTranslationException {
+      rethrow;
     } catch (e) {
       throw OnDeviceTranslationException('On-device translation failed: $e');
     } finally {
@@ -118,13 +133,16 @@ class OnDeviceTranslationService {
         if (input.isEmpty) {
           translated.add(cue);
         } else {
-          final value = cache[input] ?? await translator.translateText(input);
+          final value = cache[input] ??
+              requireNonemptyTranslation(await translator.translateText(input));
           cache[input] = value;
-          translated.add(SubtitleCue(start: cue.start, end: cue.end, text: value.trim()));
+          translated.add(SubtitleCue(start: cue.start, end: cue.end, text: value));
         }
         onProgress?.call(i + 1, cues.length);
       }
       return translated;
+    } on OnDeviceTranslationException {
+      rethrow;
     } catch (e) {
       throw OnDeviceTranslationException('On-device translation failed: $e');
     } finally {
