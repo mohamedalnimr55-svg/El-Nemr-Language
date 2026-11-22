@@ -147,6 +147,9 @@ jobs:
       - name: Generate localizations
         run: flutter gen-l10n
 
+      - name: Audit Android release and feature wiring
+        run: bash scripts/release_audit.sh android
+
       - name: Static analysis
         run: flutter analyze --no-fatal-infos
 
