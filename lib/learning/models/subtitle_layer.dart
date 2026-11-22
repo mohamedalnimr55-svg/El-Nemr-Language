@@ -9,7 +9,7 @@ class SubtitleLayer {
     required this.label,
     required this.source,
     required this.language,
-    required this.cues,
+    required List<SubtitleCue> cues,
     this.role = SubtitleLayerRole.original,
     this.x = 0.5,
     this.y = 0.82,
@@ -20,14 +20,33 @@ class SubtitleLayer {
     this.textColor = Colors.white,
     this.backgroundColor = const Color(0xB3000000),
     this.outline = true,
-  });
+  }) : _cues = _orderedCues(cues);
 
   final String id;
   final String source;
   String label;
   String language;
   SubtitleLayerRole role;
-  List<SubtitleCue> cues;
+
+  // Copy and sort new subtitle data: activeCues uses a time-indexed cursor.
+  // When the user replaces a subtitle track, discard the old cursor and the
+  // cached longest-cue duration. Both were computed from the previous track.
+  List<SubtitleCue> _cues;
+  List<SubtitleCue> get cues => _cues;
+  set cues(List<SubtitleCue> value) {
+    _cues = _orderedCues(value);
+    _cursor = 0;
+    _maxCueDurationMs = null;
+  }
+
+  static List<SubtitleCue> _orderedCues(List<SubtitleCue> value) {
+    final sorted = List<SubtitleCue>.of(value)
+      ..sort((a, b) => a.start.compareTo(b.start));
+    // An editable getter would bypass the setter's timeline/cache reset.
+    // Store an immutable snapshot on construction and every replacement.
+    return List<SubtitleCue>.unmodifiable(sorted);
+  }
+
   double x;
   double y;
   double scale;
