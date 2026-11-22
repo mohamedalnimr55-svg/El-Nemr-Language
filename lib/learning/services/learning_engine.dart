@@ -1,66 +1,133 @@
 import 'dart:math';
 import '../models/learning_models.dart';
+import 'learning_text_tokenizer.dart';
 
 class AnswerScore {
   const AnswerScore({
     required this.score,
     required this.missingWords,
     required this.extraWords,
+    this.scorable = true,
   });
 
   final double score;
   final List<String> missingWords;
   final List<String> extraWords;
+  /// False if computing a valid edit-distance grade would exceed safe limits.
+  /// Callers must not save unscorable responses as failed learning attempts.
+  final bool scorable;
 
   bool get perfect => score >= 0.999;
 }
 
 class LearningEngine {
+  // The alignment matrix has O(responseTokens * expectedTokens) memory/time.
+  // Enforce deterministic limits rather than letting large pasted/speech text
+  // exhaust device resources or freeze the learning view.
+  static const int maxScoreTextCodeUnits = 16000;
+  static const int maxScoreMatrixCells = 250000;
+
+  static const AnswerScore unscorableAnswer = AnswerScore(
+    score: 0,
+    missingWords: <String>[],
+    extraWords: <String>[],
+    scorable: false,
+  );
+
   LearningEngine({Random? random}) : _random = random ?? Random();
   final Random _random;
 
+  // Timelines are sorted by start time, but subtitles may overlap (for
+  // example two speakers or a long caption with a shorter interjection).
+  // Binary-searching by BOTH start and end incorrectly discarded an earlier
+  // active cue whenever a later, shorter cue had already ended.
   LearningSegment? segmentAt(List<LearningSegment> segments, Duration position) {
     var lo = 0;
-    var hi = segments.length - 1;
-    while (lo <= hi) {
+    var hi = segments.length;
+    // Find the first cue which starts strictly after the current position.
+    while (lo < hi) {
       final mid = (lo + hi) >> 1;
-      final s = segments[mid];
-      if (position < s.start) {
-        hi = mid - 1;
-      } else if (position >= s.end) {
+      if (segments[mid].start <= position) {
         lo = mid + 1;
       } else {
-        return s;
+        hi = mid;
       }
+    }
+    // Prefer the most recently started active cue. Earlier, longer captions
+    // are still eligible if the newer one has already ended.
+    for (var i = lo - 1; i >= 0; i--) {
+      if (position < segments[i].end) return segments[i];
     }
     return null;
   }
 
+  /// Dictation and target-language exercises expect spoken source dialogue.
+  /// Translation-to-native exercises expect the learner's own language.
+  static String answerLanguageForQuestion(
+    QuizQuestion question, {
+    required String nativeLanguage,
+    required String targetLanguage,
+  }) => question.kind == QuizKind.translateToNative
+      ? nativeLanguage
+      : targetLanguage;
+
   QuizQuestion questionFor(LearningSegment segment, {required LearningMode mode, String nativeLanguage = 'en'}) {
-    final translated = segment.translation?.trim();
+    // Speaker annotations belong in dialogue metadata/UI, not in the words
+    // a learner must dictate, translate, or pronounce.
+    final spoken = parseDialogueLine(segment.original).text;
+    final translated = segment.translation == null
+        ? null
+        : parseDialogueLine(segment.translation!).text.trim();
     final ar = nativeLanguage.toLowerCase().startsWith('ar');
     if (mode == LearningMode.listening) {
-      return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته في المقطع' : 'Type exactly what you heard', answer: segment.original, segment: segment);
+      return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته في المقطع' : 'Type exactly what you heard', answer: spoken, segment: segment);
     }
     if (translated != null && translated.isNotEmpty) {
       if (_random.nextBool()) {
         return QuizQuestion(kind: QuizKind.translateToNative, prompt: ar ? 'ترجم الجملة إلى لغتك' : 'Translate the line into your language', answer: translated, segment: segment);
       }
-      return QuizQuestion(kind: QuizKind.translateToTarget, prompt: ar ? 'اكتب الجملة باللغة التي تتعلمها' : 'Write the line in the language you are learning', answer: segment.original, segment: segment);
+      return QuizQuestion(kind: QuizKind.translateToTarget, prompt: ar ? 'اكتب الجملة باللغة التي تتعلمها' : 'Write the line in the language you are learning', answer: spoken, segment: segment);
     }
-    final words = segment.original.split(RegExp(r'\s+')).where((e) => e.length > 2).toList();
-    if (words.isNotEmpty) {
-      final word = words[_random.nextInt(words.length)];
-      return QuizQuestion(kind: QuizKind.fillBlank, prompt: segment.original.replaceFirst(word, '_____'), answer: word, segment: segment);
+    // Keep only a single scoring unit hidden. Whitespace tokenization can
+    // hide an entire unspaced Chinese, Japanese, Korean, or Thai sentence.
+    final lettersOrDigits = RegExp(r'[\p{L}\p{N}]', unicode: true);
+    final units = tokenizeLearningText(spoken)
+        .where((part) => lettersOrDigits.hasMatch(part))
+        .toList(growable: false);
+    // A single word or unknown single token has no context left once hidden.
+    if (units.length >= 2) {
+      final unit = units[_random.nextInt(units.length)];
+      final match = RegExp(
+        RegExp.escape(unit),
+        caseSensitive: false,
+        unicode: true,
+      ).firstMatch(spoken);
+      if (match != null) {
+        return QuizQuestion(
+          kind: QuizKind.fillBlank,
+          prompt: spoken.replaceRange(match.start, match.end, '_____'),
+          answer: match.group(0)!,
+          segment: segment,
+        );
+      }
     }
-    return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته' : 'Type what you heard', answer: segment.original, segment: segment);
+    return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته' : 'Type what you heard', answer: spoken, segment: segment);
   }
 
   double scoreAnswer(String answer, String expected) => scoreDetailed(answer, expected).score;
 
   AnswerScore scoreDetailed(String answer, String expected) {
-    final actual = _tokens(answer);
-    final target = _tokens(expected);
+    // Tokenization itself also allocates: reject pathological input first.
+    if (answer.length > maxScoreTextCodeUnits ||
+        expected.length > maxScoreTextCodeUnits) {
+      return unscorableAnswer;
+    }
+    final actual = tokenizeLearningText(answer);
+    final target = tokenizeLearningText(expected);
+    if ((actual.length + 1) * (target.length + 1) >
+        maxScoreMatrixCells) {
+      return unscorableAnswer;
+    }
     if (target.isEmpty) {
       return AnswerScore(
         score: actual.isEmpty ? 1.0 : 0.0,
@@ -127,11 +194,4 @@ class LearningEngine {
     );
   }
 
-  List<String> _tokens(String value) => value
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^\w\u00C0-\u024F\u0400-\u052F\u0600-\u06FF\u0750-\u077F\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]+', unicode: true), ' ')
-      .trim()
-      .split(RegExp(r'\s+'))
-      .where((e) => e.isNotEmpty)
-      .toList();
 }

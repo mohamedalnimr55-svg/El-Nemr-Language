@@ -32,6 +32,31 @@ void main() {
       expect(estimatedCefr(hard), isNotEmpty);
     });
 
+    test('Hindi and Greek word-based captions are not discarded as empty', () {
+      const duration = Duration(seconds: 3);
+      final hindi = estimateLearningDifficulty(
+        'हम आज अपने दोस्तों के साथ भाषा सीखने के लिए एक नई कहानी सुनने जा रहे हैं।',
+        duration,
+      );
+      final greek = estimateLearningDifficulty(
+        'Σήμερα θα μάθουμε μια καινούργια γλώσσα και θα συνεχίσουμε με δύσκολες λέξεις.',
+        duration,
+      );
+      expect(hindi, greaterThan(.05));
+      expect(greek, greaterThan(.05));
+      expect(hindi, inInclusiveRange(.05, 1));
+      expect(greek, inInclusiveRange(.05, 1));
+    });
+
+    test('Unicode word boundaries keep accents and leave empty input easy', () {
+      expect(estimateLearningDifficulty('', const Duration(seconds: 4)), .05);
+      final accented = estimateLearningDifficulty(
+        'Είναι πραγματικά υπέροχο που όλοι συνεργαζόμαστε για να μιλήσουμε διαφορετικά.',
+        const Duration(seconds: 2),
+      );
+      expect(accented, greaterThan(.05));
+    });
+
     test('CEFR labels are monotonic', () {
       expect(estimatedCefr(0.10), 'A1');
       expect(estimatedCefr(0.25), 'A2');

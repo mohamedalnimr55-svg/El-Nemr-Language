@@ -18,13 +18,29 @@ class TextLanguageDetector {
       'ja': RegExp(r'[\u3040-\u30FF]').allMatches(sample).length,
       'ko': RegExp(r'[\uAC00-\uD7AF]').allMatches(sample).length,
       'zh': RegExp(r'[\u3400-\u9FFF]').allMatches(sample).length,
+      'el': RegExp(r'[\u0370-\u03FF]').allMatches(sample).length,
+      'he': RegExp(r'[\u0590-\u05FF]').allMatches(sample).length,
+      'hy': RegExp(r'[\u0530-\u058F]').allMatches(sample).length,
+      'ka': RegExp(r'[\u10A0-\u10FF]').allMatches(sample).length,
+      'th': RegExp(r'[\u0E00-\u0E7F]').allMatches(sample).length,
+      'lo': RegExp(r'[\u0E80-\u0EFF]').allMatches(sample).length,
+      'ta': RegExp(r'[\u0B80-\u0BFF]').allMatches(sample).length,
+      'te': RegExp(r'[\u0C00-\u0C7F]').allMatches(sample).length,
+      'kn': RegExp(r'[\u0C80-\u0CFF]').allMatches(sample).length,
+      'ml': RegExp(r'[\u0D00-\u0D7F]').allMatches(sample).length,
+      'km': RegExp(r'[\u1780-\u17FF]').allMatches(sample).length,
+      'my': RegExp(r'[\u1000-\u109F]').allMatches(sample).length,
     };
     final letters = RegExp(r'[\p{L}]', unicode: true).allMatches(sample).length;
     if (letters > 0) {
+      final kana = counts['ja']!;
+      // Japanese can contain *more Han (kanji) than kana*. Choosing only
+      // the largest block misidentifies such subtitles as Chinese.
+      // Strong kana evidence overrides the shared Han script.
+      if (kana >= 8 && kana / letters >= .12) return 'ja';
+
       final ordered = counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
       final top = ordered.first;
-      // Japanese subtitles frequently include Han characters; kana is the
-      // stronger signal and therefore wins before the Chinese check below.
       if (top.value >= 8 && top.value / letters >= .18) return top.key;
     }
 

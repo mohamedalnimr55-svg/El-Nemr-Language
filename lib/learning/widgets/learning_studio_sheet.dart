@@ -5,12 +5,13 @@ import '../models/learning_models.dart';
 import '../models/subtitle_layer.dart';
 import '../models/learner_profile.dart';
 import '../services/learning_engine.dart';
+import '../services/learning_progress_store.dart';
 import '../services/speech_coach_service.dart';
 import '../services/speech_assessment.dart';
 import '../services/ai_language_service.dart';
 import '../services/video_flashcard_store.dart';
 import '../services/on_device_translation_service.dart';
-import '../services/local_language_coach.dart';
+import '../services/lesson_explanation_service.dart';
 import '../services/vocabulary_store.dart';
 
 class LearningStudioSheet extends StatefulWidget {
@@ -57,7 +58,7 @@ class LearningStudioSheet extends StatefulWidget {
   final VoidCallback onAddSubtitle;
   final ValueChanged<bool> onEditLayoutChanged;
   final bool editLayout;
-  final void Function(String segmentId, double score) onRecordScore;
+  final void Function(LearningSegment segment, double score) onRecordScore;
   final VoidCallback onPauseForSpeech;
   final LearnerProfile profile;
   final ValueChanged<LearnerProfile> onProfileChanged;
@@ -79,20 +80,30 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   final LearningEngine _engine = LearningEngine();
   final TextEditingController _answer = TextEditingController();
   QuizQuestion? _question;
+  bool _answerRevealed = false;
+  bool _questionGraded = false;
   double? _lastScore;
   AnswerScore? _lastAnswerScore;
+  String? _gradingError;
   SpeechAssessment? _lastSpeechAssessment;
   late LearningMode _mode;
   late bool _editLayout;
   late LearnerProfile _profile;
   bool _listening = false;
+  int _speechRequestId = 0;
   String? _speechError;
   bool _aiBusy = false;
+  int _aiRequestId = 0;
   String? _aiExplanation;
   String? _aiError;
   Map<String, Map<String, dynamic>> _flashcards = <String, Map<String, dynamic>>{};
+  final Set<String> _flashcardToggleBusy = <String>{};
   Timer? _positionTicker;
-  String? _activeSegmentId;
+  LearningSegment? _activeSegment;
+
+  static bool _sameSegment(LearningSegment? a, LearningSegment? b) =>
+      a == null ? b == null : b != null &&
+          LearningProgressStore.sameSegmentIdentity(a, b);
 
   @override
   void initState() {
@@ -101,17 +112,35 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     _editLayout = widget.editLayout;
     _profile = widget.profile;
     _loadFlashcards();
-    _activeSegmentId = _current?.id;
+    _activeSegment = _current;
     _positionTicker = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
-      final currentId = _current?.id;
-      final changed = currentId != _activeSegmentId;
+      final current = _current;
+      final changed = !_sameSegment(_activeSegment, current);
       if (changed) {
-        _activeSegmentId = currentId;
-        _question = null;
-        _answer.clear();
-        _lastScore = null;
-        _lastAnswerScore = null;
+        // Do not let in-flight AI or speech results leak into another scene.
+        _aiRequestId++;
+        _aiBusy = false;
+        _speechRequestId++;
+        if (_listening) {
+          unawaited(SpeechCoachService.instance.stop());
+          _listening = false;
+        }
+        _activeSegment = current;
+        // Review seeks to another subtitle *and* creates its quiz. Keep that
+        // question after the position ticker detects the new sentence.
+        final reviewQuestionAtDestination =
+            _sameSegment(_question?.segment, current);
+        if (!reviewQuestionAtDestination) {
+          _question = null;
+          _answerRevealed = false;
+          _questionGraded = false;
+          _answer.clear();
+          _lastScore = null;
+          _lastAnswerScore = null;
+          _gradingError = null;
+        }
+        _lastSpeechAssessment = null;
         _speechError = null;
         _aiExplanation = null;
         _aiError = null;
@@ -123,6 +152,9 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   @override
   void dispose() {
     _positionTicker?.cancel();
+    _aiRequestId++;
+    _speechRequestId++;
+    if (_listening) unawaited(SpeechCoachService.instance.stop());
     _answer.dispose();
     super.dispose();
   }
@@ -135,8 +167,11 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     }
   }
 
-  LearningSegment? get _current => _engine.segmentAt(widget.segments, _livePosition) ??
-      (widget.segments.isNotEmpty ? widget.segments.first : null);
+  // Do not surface the video's FIRST sentence when playback is in a gap
+  // between subtitle cues. That made quizzes/explanations target unrelated
+  // dialogue as soon as the movie moved off a captioned interval.
+  LearningSegment? get _current =>
+      _engine.segmentAt(widget.segments, _livePosition);
 
   @override
   Widget build(BuildContext context) {
@@ -147,11 +182,10 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         minChildSize: 0.42,
         maxChildSize: 0.94,
         expand: false,
-        builder: (context, scrollController) => DecoratedBox(
-          decoration: const BoxDecoration(
-            color: Color(0xFF121316),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
+        builder: (context, scrollController) => Material(
+          color: const Color(0xFF121316),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          clipBehavior: Clip.antiAlias,
           child: ListView(
             controller: scrollController,
             padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
@@ -256,9 +290,14 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
                 const SizedBox(height: 10),
               ],
               if (current == null)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Text('Add an original-language subtitle to create lessons and quizzes from this video.', style: TextStyle(color: Colors.white60)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Text(
+                    widget.segments.isEmpty
+                        ? 'Add an original-language subtitle to create lessons and quizzes from this video.'
+                        : 'No spoken line at the current playback position. Seek to a subtitled line to practise.',
+                    style: const TextStyle(color: Colors.white60),
+                  ),
                 )
               else ...[
                 const Text('Current learning segment', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
@@ -277,9 +316,13 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
                     const SizedBox(width: 8),
                     Expanded(child: OutlinedButton.icon(onPressed: () => _newQuestion(current), icon: const Icon(Icons.quiz_outlined), label: const Text('Quiz me'))),
                     IconButton(
-                      tooltip: _flashcards.containsKey(current.id) ? 'Remove video flashcard' : 'Save video flashcard',
-                      onPressed: () => _toggleFlashcard(current),
-                      icon: Icon(_flashcards.containsKey(current.id) ? Icons.star : Icons.star_border, color: Colors.amberAccent),
+                      tooltip: VideoFlashcardStore.matchesSegment(_flashcards[current.id], current)
+                          ? 'Remove video flashcard' : 'Save video flashcard',
+                      onPressed: _flashcardToggleBusy.contains(current.id)
+                          ? null
+                          : () => _toggleFlashcard(current),
+                      icon: Icon(VideoFlashcardStore.matchesSegment(_flashcards[current.id], current)
+                          ? Icons.star : Icons.star_border, color: Colors.amberAccent),
                     ),
                   ],
                 ),
@@ -515,15 +558,33 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(q.prompt, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
       const SizedBox(height: 10),
-      TextField(controller: _answer, minLines: 1, maxLines: 4, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: 'اكتب إجابتك…', hintStyle: TextStyle(color: Colors.white38), border: OutlineInputBorder())),
+      TextField(controller: _answer, readOnly: _answerRevealed || _questionGraded, minLines: 1, maxLines: 4, style: const TextStyle(color: Colors.white), onChanged: (_) { if (_gradingError != null) setState(() => _gradingError = null); }, decoration: const InputDecoration(hintText: 'اكتب إجابتك…', hintStyle: TextStyle(color: Colors.white38), border: OutlineInputBorder())),
+      if (_gradingError != null) Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(_gradingError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+      ),
       const SizedBox(height: 10),
       Row(children: [
-        FilledButton(onPressed: _grade, child: const Text('Check')),
+        FilledButton(
+          onPressed: _answerRevealed || _questionGraded ? null : _grade,
+          child: Text(_questionGraded ? 'Graded' : _answerRevealed ? 'Revealed · not graded' : 'Check'),
+        ),
         const SizedBox(width: 10),
-        TextButton(onPressed: () => setState(() { _answer.text = q.answer; _lastScore = null; _lastAnswerScore = null; }), child: const Text('Show answer')),
+        TextButton(
+          onPressed: _answerRevealed ? null : () => setState(() {
+            _answer.text = q.answer;
+            _answerRevealed = true;
+            if (!_questionGraded) {
+              _lastScore = null;
+              _lastAnswerScore = null;
+              _gradingError = null;
+            }
+          }),
+          child: const Text('Show answer'),
+        ),
         IconButton(
           tooltip: 'Answer by voice',
-          onPressed: _listening ? null : () => _listenAndFill(q.segment),
+          onPressed: _listening || _answerRevealed || _questionGraded ? null : () => _listenAndFill(q),
           icon: _listening
               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
               : const Icon(Icons.mic, color: Colors.lightBlueAccent),
@@ -580,8 +641,14 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
 
   Widget _levelPicker() => DropdownButtonFormField<String>(
     initialValue: const ['A1','A2','B1','B2','C1','C2'].contains(_profile.level) ? _profile.level : 'A2',
+    isExpanded: true,
     dropdownColor: const Color(0xFF25272C),
-    decoration: const InputDecoration(labelText: 'Level', isDense: true, border: OutlineInputBorder()),
+    decoration: const InputDecoration(
+      labelText: 'Level',
+      isDense: true,
+      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      border: OutlineInputBorder(),
+    ),
     items: [for (final level in const ['A1','A2','B1','B2','C1','C2']) DropdownMenuItem(value: level, child: Text(level, style: const TextStyle(color: Colors.white)))],
     onChanged: (v) { if (v != null) _setProfile(_profile.copyWith(level: v)); },
   );
@@ -657,7 +724,7 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         Text('Shadow practice', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
       ]),
       const SizedBox(height: 8),
-      const Text('Listen once, then repeat the line. The first score checks recognized words; phoneme-level pronunciation scoring can be added as a separate provider.', style: TextStyle(color: Colors.white54, fontSize: 12)),
+      const Text('Listen once, then repeat the line. Scores compare recognized text, including characters in languages without spaces. This does not measure pronunciation or accent.', style: TextStyle(color: Colors.white54, fontSize: 12)),
       if (_speechError != null) ...[
         const SizedBox(height: 8),
         Text(_speechError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
@@ -676,15 +743,16 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _metricChip('Words', _lastSpeechAssessment!.wordAccuracy),
+            _metricChip('Transcript match', _lastSpeechAssessment!.wordAccuracy),
             _metricChip('Completeness', _lastSpeechAssessment!.completeness),
-            _metricChip('Pace', _lastSpeechAssessment!.pace),
+            if (_lastSpeechAssessment!.pace != null)
+              _metricChip('Pace', _lastSpeechAssessment!.pace!),
             _metricChip('Overall', _lastSpeechAssessment!.overall),
           ],
         ),
         const SizedBox(height: 6),
         const Text(
-          'Local word/timing feedback · not phoneme or accent scoring.',
+          'Speech-to-text similarity only; not phoneme or accent accuracy. Speaking pace is not measured here.',
           style: TextStyle(color: Colors.white38, fontSize: 11),
         ),
       ],
@@ -709,9 +777,11 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     );
   }
 
-  List<MapEntry<String, Map<String, dynamic>>> get _dueFlashcards => _flashcards.entries
-      .where((e) => VideoFlashcardStore.isDue(e.value))
-      .toList(growable: false);
+  List<MapEntry<String, Map<String, dynamic>>> get _dueFlashcards =>
+      VideoFlashcardStore.dueForSegments(
+        _flashcards,
+        widget.segments,
+      );
 
   Future<void> _loadFlashcards() async {
     try {
@@ -721,8 +791,17 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   }
 
   Future<void> _toggleFlashcard(LearningSegment segment) async {
-    await VideoFlashcardStore.toggle(widget.videoKey, segment);
-    await _loadFlashcards();
+    // A double tap can dispatch two callbacks before the IconButton rebuilds.
+    // Guard synchronously so the same card isn't saved then removed again.
+    if (!_flashcardToggleBusy.add(segment.id)) return;
+    if (mounted) setState(() {});
+    try {
+      await VideoFlashcardStore.toggle(widget.videoKey, segment);
+      await _loadFlashcards();
+    } finally {
+      _flashcardToggleBusy.remove(segment.id);
+      if (mounted) setState(() {});
+    }
   }
 
   void _reviewNextDue() {
@@ -734,6 +813,8 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     widget.onSeek(segment.start);
     setState(() {
       _question = _engine.questionFor(segment, mode: LearningMode.test, nativeLanguage: _profile.nativeLanguage);
+      _answerRevealed = false;
+      _questionGraded = false;
       _answer.clear();
       _lastScore = null;
       _lastAnswerScore = null;
@@ -741,33 +822,35 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
   }
 
   Future<void> _explainWithAi(LearningSegment segment) async {
+    final requestId = ++_aiRequestId;
     setState(() { _aiBusy = true; _aiError = null; _aiExplanation = null; });
+    bool isCurrentRequest() => mounted &&
+        _aiRequestId == requestId &&
+        _sameSegment(_current, segment);
+
     try {
-      String explanation;
-      if (AiLanguageService.isConfigured) {
-        final index = widget.segments.indexWhere((e) => e.id == segment.id);
-        final previous = index > 0 ? widget.segments[index - 1].original : null;
-        final next = index >= 0 && index + 1 < widget.segments.length ? widget.segments[index + 1].original : null;
-        explanation = await AiLanguageService.explainSegment(
-          segment: segment,
-          profile: _profile,
-          previous: previous,
-          next: next,
-        );
-      } else {
-        explanation = await LocalLanguageCoach.explain(
-          segment: segment,
-          profile: _profile,
-          sourceLanguage: _targetLanguage(),
-        );
+      final index = widget.segments.indexWhere((e) => e.id == segment.id);
+      final result = await LessonExplanationService.explain(
+        segment: segment,
+        profile: _profile,
+        sourceLanguage: _targetLanguage(),
+        previous: index > 0 ? widget.segments[index - 1].original : null,
+        next: index >= 0 && index + 1 < widget.segments.length
+            ? widget.segments[index + 1].original
+            : null,
+      );
+      if (isCurrentRequest()) {
+        setState(() {
+          _aiExplanation = result.text;
+          _aiError = result.warning;
+        });
       }
-      if (mounted) setState(() => _aiExplanation = explanation);
     } catch (e) {
-      if (mounted) {
-        setState(() => _aiError = 'Could not explain this scene locally: $e');
+      if (isCurrentRequest()) {
+        setState(() => _aiError = 'Could not explain this scene: $e');
       }
     } finally {
-      if (mounted) setState(() => _aiBusy = false);
+      if (isCurrentRequest()) setState(() => _aiBusy = false);
     }
   }
 
@@ -778,42 +861,67 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
     return any.isNotEmpty ? any.first.language : _profile.targetLanguage;
   }
 
-  Future<void> _listenAndFill(LearningSegment segment) async {
+  Future<void> _listenAndFill(QuizQuestion question) async {
+    final requestId = ++_speechRequestId;
     widget.onPauseForSpeech();
     setState(() { _listening = true; _speechError = null; });
+    bool stillCurrent() => mounted && requestId == _speechRequestId &&
+        identical(_question, question) &&
+        _sameSegment(_current, question.segment) &&
+        !_answerRevealed && !_questionGraded;
     try {
-      final text = await SpeechCoachService.instance.listen(languageCode: _targetLanguage());
-      if (!mounted) return;
+      // Translate-to-native answers are spoken in the learner's language,
+      // not the video's original language.
+      final language = LearningEngine.answerLanguageForQuestion(
+        question,
+        nativeLanguage: _profile.nativeLanguage,
+        targetLanguage: _targetLanguage(),
+      );
+      final text = await SpeechCoachService.instance.listen(languageCode: language);
+      if (!stillCurrent()) return;
       if (text != null) _answer.text = text;
     } catch (e) {
-      if (mounted) setState(() => _speechError = e.toString());
+      if (stillCurrent()) setState(() => _speechError = e.toString());
     } finally {
-      if (mounted) setState(() => _listening = false);
+      if (mounted && requestId == _speechRequestId) {
+        setState(() => _listening = false);
+      }
     }
   }
 
   Future<void> _listenAndScoreShadow(LearningSegment segment) async {
+    final requestId = ++_speechRequestId;
     widget.onPauseForSpeech();
     setState(() { _listening = true; _speechError = null; _lastScore = null; _lastAnswerScore = null; _lastSpeechAssessment = null; });
+    bool stillCurrent() => mounted && requestId == _speechRequestId &&
+        _sameSegment(_current, segment);
     try {
-      final stopwatch = Stopwatch()..start();
+      // The time spent waiting for Android SpeechRecognizer is NOT the
+      // learner's actual speaking duration. Do not report it as pace.
       final text = await SpeechCoachService.instance.listen(languageCode: _targetLanguage());
-      stopwatch.stop();
-      if (!mounted) return;
-      if (text == null) return;
-      final detail = _engine.scoreDetailed(text, segment.original);
+      if (!stillCurrent() || text == null) return;
+      // Role-play speaker labels must not be scored as spoken words.
+      final spokenLine = parseDialogueLine(segment.original).text;
+      final detail = _engine.scoreDetailed(text, spokenLine);
+      if (!detail.scorable) {
+        if (stillCurrent()) setState(() => _speechError =
+            'Speech transcript is too long to grade safely. Try a shorter sentence.');
+        return;
+      }
       final assessment = assessSpeech(
         answer: detail,
-        expectedText: segment.original,
+        expectedText: spokenLine,
         expectedDuration: segment.duration,
-        speakingDuration: stopwatch.elapsed,
       );
       final score = assessment.overall;
-      widget.onRecordScore(segment.id, score);
-      if (_flashcards.containsKey(segment.id)) {
-        await VideoFlashcardStore.review(widget.videoKey, segment.id, score);
+      widget.onRecordScore(segment, score);
+      if (VideoFlashcardStore.matchesSegment(_flashcards[segment.id], segment)) {
+        await VideoFlashcardStore.review(
+          widget.videoKey, segment.id, score, expectedSegment: segment,
+        );
         await _loadFlashcards();
       }
+      if (!stillCurrent()) return;
       setState(() {
         _answer.text = text;
         _lastScore = score;
@@ -821,34 +929,51 @@ class _LearningStudioSheetState extends State<LearningStudioSheet> {
         _lastSpeechAssessment = assessment;
       });
     } catch (e) {
-      if (mounted) setState(() => _speechError = e.toString());
+      if (stillCurrent()) setState(() => _speechError = e.toString());
     } finally {
-      if (mounted) setState(() => _listening = false);
+      if (mounted && requestId == _speechRequestId) {
+        setState(() => _listening = false);
+      }
     }
   }
 
   void _newQuestion(LearningSegment segment) {
     setState(() {
       _question = _engine.questionFor(segment, mode: _mode, nativeLanguage: _profile.nativeLanguage);
+      _answerRevealed = false;
+      _questionGraded = false;
       _answer.clear();
       _lastScore = null;
       _lastAnswerScore = null;
+      _gradingError = null;
     });
   }
 
   void _grade() {
     final q = _question;
-    if (q == null) return;
+    if (q == null || _answerRevealed || _questionGraded ||
+        !_sameSegment(_current, q.segment)) return;
     final detail = _engine.scoreDetailed(_answer.text, q.answer);
-    final score = detail.score;
-    widget.onRecordScore(q.segment.id, score);
-    if (_flashcards.containsKey(q.segment.id)) {
-      VideoFlashcardStore.review(widget.videoKey, q.segment.id, score).then((_) => _loadFlashcards());
+    if (!detail.scorable) {
+      setState(() => _gradingError =
+          'Answer is too long to grade safely. Shorten it and try again.');
+      return; // Never record a fake zero or alter flashcard intervals.
     }
+    final score = detail.score;
+    // Commit the state before side effects. Multiple taps on Check (or
+    // repeated callbacks before a frame) must count as only one attempt.
     setState(() {
+      _questionGraded = true;
+      _gradingError = null;
       _lastScore = score;
       _lastAnswerScore = detail;
     });
+    widget.onRecordScore(q.segment, score);
+    if (VideoFlashcardStore.matchesSegment(_flashcards[q.segment.id], q.segment)) {
+      VideoFlashcardStore.review(
+        widget.videoKey, q.segment.id, score, expectedSegment: q.segment,
+      ).then((_) => _loadFlashcards());
+    }
   }
 
 
