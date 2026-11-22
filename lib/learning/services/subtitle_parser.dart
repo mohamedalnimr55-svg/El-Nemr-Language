@@ -4,7 +4,10 @@ class SubtitleParser {
   const SubtitleParser._();
 
   static List<SubtitleCue> parse(String source, {String? extension}) {
-    final normalized = source.replaceFirst('\uFEFF', '').replaceAll('\r\n', '\n');
+    final normalized = source
+        .replaceFirst('\uFEFF', '')
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n');
     final ext = (extension ?? '').toLowerCase();
     if (ext.endsWith('vtt') || normalized.trimLeft().startsWith('WEBVTT')) {
       return _parseVtt(normalized);
@@ -28,7 +31,10 @@ class SubtitleParser {
       if (m == null) continue;
       final text = lines.skip(timeIndex + 1).join('\n').trim();
       if (text.isEmpty) continue;
-      cues.add(SubtitleCue(start: _clock(m.group(1)!), end: _clock(m.group(2)!), text: _clean(text)));
+      final start = _clock(m.group(1)!);
+      final end = _clock(m.group(2)!);
+      if (end <= start) continue;
+      cues.add(SubtitleCue(start: start, end: end, text: _clean(text)));
     }
     cues.sort((a, b) => a.start.compareTo(b.start));
     return cues;
@@ -37,9 +43,22 @@ class SubtitleParser {
   static List<SubtitleCue> _parseVtt(String source) {
     final lines = source.split('\n');
     final cues = <SubtitleCue>[];
-    final timeRe = RegExp(r'(?:(\d{1,2}):)?(\d{2}):(\d{2})[.](\d{1,3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.](\d{1,3})');
+    final timeRe = RegExp(r'^\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.](\d{1,3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.](\d{1,3})');
     var i = 0;
     while (i < lines.length) {
+      final directive = lines[i].trim();
+      // NOTE comments, STYLE and REGION blocks are not dialogue. Their
+      // contents can legitimately include timestamp-like strings.
+      if (directive == 'NOTE' ||
+          directive.startsWith('NOTE ') ||
+          directive == 'STYLE' ||
+          directive == 'REGION') {
+        i++;
+        while (i < lines.length && lines[i].trim().isNotEmpty) {
+          i++;
+        }
+        continue;
+      }
       final m = timeRe.firstMatch(lines[i]);
       if (m == null) { i++; continue; }
       final start = _vttClock(m.group(1), m.group(2)!, m.group(3)!, m.group(4)!);
