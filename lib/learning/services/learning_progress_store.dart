@@ -28,6 +28,18 @@ class LearningProgressStore {
       progress['startMs'] == segment.start.inMilliseconds &&
       progress['endMs'] == segment.end.inMilliseconds;
 
+  /// An answer produced for an earlier subtitle version must not be
+  /// attributed to a replacement that reuses the same segment ID.
+  static bool sameSegmentIdentity(
+    LearningSegment recorded,
+    LearningSegment current,
+  ) =>
+      recorded.id == current.id &&
+      recorded.start == current.start &&
+      recorded.end == current.end &&
+      recorded.original == current.original &&
+      recorded.translation == current.translation;
+
   static Future<void> record(
     String videoKey,
     String segmentId,
