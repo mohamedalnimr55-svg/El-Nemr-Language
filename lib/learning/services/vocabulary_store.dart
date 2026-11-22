@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
+import 'learning_write_queue.dart';
 
 enum VocabularyGrade { again, hard, good, easy }
 
@@ -129,7 +130,7 @@ class VocabularyStore {
     required String language,
     required String meaning,
     required String context,
-  }) async {
+  }) => LearningWriteQueue.run<void>(_prefsKey, () async {
     final items = await load();
     final key = keyFor(word, language);
     final index = items.indexWhere((e) => e.key == key);
@@ -151,7 +152,7 @@ class VocabularyStore {
           );
     if (index < 0) items.add(item); else items[index] = item;
     await _save(items);
-  }
+  });
 
   static Future<List<VocabularyItem>> due() async {
     final items = await load();
@@ -159,13 +160,14 @@ class VocabularyStore {
     return due;
   }
 
-  static Future<void> review(String key, VocabularyGrade grade) async {
+  static Future<void> review(String key, VocabularyGrade grade) =>
+      LearningWriteQueue.run<void>(_prefsKey, () async {
     final items = await load();
     final index = items.indexWhere((e) => e.key == key);
     if (index < 0) return;
     items[index] = items[index].reviewed(grade);
     await _save(items);
-  }
+  });
 
   static Future<void> _save(List<VocabularyItem> items) async {
     final prefs = await SharedPreferences.getInstance();
