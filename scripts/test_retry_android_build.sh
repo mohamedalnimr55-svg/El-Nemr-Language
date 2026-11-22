@@ -35,6 +35,11 @@ bash retry_android_build.sh "$tmp/mock_build.sh" > "$tmp/result.log" 2>&1
 assert_count 3
 printf 0 > "$RETRY_TEST_COUNTER"; export RETRY_TEST_MODE=always-429
 if bash retry_android_build.sh "$tmp/mock_build.sh" > "$tmp/result.log" 2>&1; then
+  echo 'Expected exhausted HTTP 429 retries to fail' >&2; exit 1
+fi
+assert_count 3
+printf 0 > "$RETRY_TEST_COUNTER"; export RETRY_TEST_MODE=code-error
+if bash retry_android_build.sh "$tmp/mock_build.sh" > "$tmp/result.log" 2>&1; then
   echo 'Expected non-429 error to fail' >&2; exit 1
 fi
 assert_count 1
