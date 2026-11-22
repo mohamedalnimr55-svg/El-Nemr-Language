@@ -309,6 +309,26 @@ void main() {
       expect(engine.scoreAnswer('ສະບາ', 'ສະບາຍ'), inExclusiveRange(0, 1));
     });
 
+    test('less-common Unicode scripts count in multilingual answers', () {
+      final engine = LearningEngine(random: Random(5));
+      expect(engine.scoreAnswer('hello བཀྲ་ཤིས', 'hello ལྷ་ས'), lessThan(1),
+          reason: 'Tibetan words must not vanish next to English.');
+      expect(engine.scoreAnswer('abc ⵜⴰⵎⴰⵣⵉⵖⵜ', 'abc ⴰⵣⵓⵍ'), lessThan(1),
+          reason: 'Tifinagh words must count even without a hardcoded block.');
+      expect(engine.scoreAnswer('hello 🦊', 'hello 🦁'), closeTo(0.5, 0.001),
+          reason: 'Symbols next to Latin words must not be silently dropped.');
+      expect(engine.scoreAnswer('hello你好', 'hello你们'), closeTo(2 / 3, 0.001),
+          reason: 'Chinese units must split even when adjacent to Latin text.');
+      expect(engine.scoreAnswer('བཀྲ་ཤིས', 'བཀྲ་ཤིས'), 1);
+    });
+
+    test('Unicode combining marks and punctuation remain stable', () {
+      final engine = LearningEngine(random: Random(5));
+      expect(engine.scoreAnswer('Αθήνα!', 'αθήνα'), 1);
+      expect(engine.scoreAnswer('नमस्ते', 'नमस्ते।'), 1);
+      expect(engine.scoreAnswer('Hello, world!', 'hello world'), 1);
+    });
+
     test('detailed scoring reports missing and different words', () {
       final engine = LearningEngine(random: Random(1));
       final result = engine.scoreDetailed('I go school', 'I go to school');

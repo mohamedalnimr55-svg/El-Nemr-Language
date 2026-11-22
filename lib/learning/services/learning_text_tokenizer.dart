@@ -1,24 +1,50 @@
 /// Normalize typed/recognized subtitle text into scoring units.
 ///
-/// Languages with whitespace-delimited words (Latin, Greek, Cyrillic,
-/// Hebrew, Arabic, Indic and other listed scripts) retain word tokens.
-/// Chinese, Japanese, Korean, Thai, Lao, Khmer and Myanmar often have
-/// no spaces, so their code points are scored independently to avoid
-/// assigning a perfect score to different strings with zero tokens.
+/// Whitespace-delimited languages keep words together, including any Unicode
+/// letters, combining marks and numbers (not just a fixed list of scripts).
+/// Chinese, Japanese, Korean, Thai, Lao, Khmer and Myanmar are scored by
+/// codepoint where text often has no spaces. Symbols/emoji count as separate
+/// units so different mixed text cannot accidentally receive 100% credit.
 ///
-/// This is transcript similarity, not pronunciation or phoneme scoring.
+/// This estimates transcript similarity, not pronunciation or phonemes.
+final RegExp _unspacedScript = RegExp(
+  r'[\u0E00-\u0EFF\u1000-\u109F\u1780-\u17FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]',
+  unicode: true,
+);
+final RegExp _wordCharacter = RegExp(r'[\p{L}\p{M}\p{N}_]', unicode: true);
+final RegExp _symbolCharacter = RegExp(r'[\p{S}]', unicode: true);
+
 List<String> tokenizeLearningText(String value) {
   final normalized = value.toLowerCase();
-  final pattern = RegExp(
-    r'[a-z0-9_\u00C0-\u024F\u0300-\u036F\u0370-\u052F\u0530-\u058F\u0590-\u06FF\u0750-\u077F\u08A0-\u08FF\u0900-\u0DFF\u10A0-\u10FF\u1200-\u137F\u1E00-\u1FFF]+|[\u0E00-\u0EFF\u1000-\u109F\u1780-\u17FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]',
-    unicode: true,
-  );
-  final tokens = pattern.allMatches(normalized)
-      .map((match) => match.group(0)!)
-      .toList(growable: false);
-  // A never-seen writing system or symbol-only subtitle must not silently
-  // become empty and get perfect credit against a different nonempty answer.
+  final units = <String>[];
+  var word = StringBuffer();
+
+  void flushWord() {
+    final token = word.toString();
+    if (token.isNotEmpty) units.add(token);
+    word = StringBuffer();
+  }
+
+  // Rune iteration preserves supplementary-plane letters and symbols.
+  for (final rune in normalized.runes) {
+    final char = String.fromCharCode(rune);
+    if (_unspacedScript.hasMatch(char)) {
+      flushWord();
+      units.add(char);
+    } else if (_wordCharacter.hasMatch(char)) {
+      word.write(char);
+    } else if (_symbolCharacter.hasMatch(char)) {
+      flushWord();
+      units.add(char);
+    } else {
+      flushWord();
+    }
+  }
+  flushWord();
+
+  // Keep a nonempty unknown string from being interpreted as an empty
+  // answer and incorrectly receiving the maximum score.
   final fallback = normalized.trim();
-  if (tokens.isEmpty && fallback.isNotEmpty) return <String>[fallback];
-  return tokens;
+  if (units.isEmpty && fallback.isNotEmpty) return <String>[fallback];
+  return units;
 }
