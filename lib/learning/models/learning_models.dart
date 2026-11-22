@@ -90,12 +90,12 @@ String? _translationNear(SubtitleCue cue, List<SubtitleCue> translated, int star
 }
 
 double estimateLearningDifficulty(String text, Duration duration) {
+  // Keep all Unicode letters and combining marks, not only Latin/Cyrillic/
+  // Arabic/CJK blocks. Previously Hindi/Greek/Hebrew captions were stripped
+  // completely and scored as difficulty 0.05 regardless of their content.
   final words = text
       .replaceAll(
-        RegExp(
-          r'[^\w\u00C0-\u024F\u0400-\u052F\u0600-\u06FF\u0750-\u077F\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF’\-]+',
-          unicode: true,
-        ),
+        RegExp(r'[^\p{L}\p{M}\p{N}_’\-]+', unicode: true),
         ' ',
       )
       .trim()
