@@ -1,66 +1,179 @@
 import 'dart:math';
 import '../models/learning_models.dart';
+import 'learning_text_tokenizer.dart';
+
+/// Cached max-end index for a start-sorted, immutable subtitle timeline.
+///
+/// A plain backward scan has O(n) cost in subtitle gaps and with a long cue
+/// overlapping thousands of short captions. The tree finds the most recently
+/// started still-active cue in O(log n), even for overlapping subtitles.
+class _TimelineEndIndex {
+  _TimelineEndIndex._(this.capacity, this._maxEndMicros);
+
+  final int capacity;
+  final List<int> _maxEndMicros;
+  static const int _emptyEnd = -9223372036854775807;
+
+  factory _TimelineEndIndex.build(List<LearningSegment> segments) {
+    var capacity = 1;
+    while (capacity < segments.length) {
+      capacity *= 2;
+    }
+    final maxEnd = List<int>.filled(capacity * 2, _emptyEnd);
+    for (var i = 0; i < segments.length; i++) {
+      maxEnd[capacity + i] = segments[i].end.inMicroseconds;
+    }
+    for (var node = capacity - 1; node > 0; node--) {
+      maxEnd[node] = max(maxEnd[node * 2], maxEnd[node * 2 + 1]);
+    }
+    return _TimelineEndIndex._(capacity, maxEnd);
+  }
+
+  int lastActiveBefore(int exclusiveUpperBound, int timeMicros) =>
+      _find(1, 0, capacity, exclusiveUpperBound, timeMicros);
+
+  int _find(int node, int start, int end, int bound, int timeMicros) {
+    if (start >= bound || _maxEndMicros[node] <= timeMicros) return -1;
+    if (end - start == 1) return start;
+    final mid = (start + end) >> 1;
+    // Searching right first preserves the original most-recent-start rule.
+    final newer = _find(node * 2 + 1, mid, end, bound, timeMicros);
+    return newer >= 0
+        ? newer
+        : _find(node * 2, start, mid, bound, timeMicros);
+  }
+}
 
 class AnswerScore {
   const AnswerScore({
     required this.score,
     required this.missingWords,
     required this.extraWords,
+    this.scorable = true,
   });
 
   final double score;
   final List<String> missingWords;
   final List<String> extraWords;
+  /// False if computing a valid edit-distance grade would exceed safe limits.
+  /// Callers must not save unscorable responses as failed learning attempts.
+  final bool scorable;
 
   bool get perfect => score >= 0.999;
 }
 
 class LearningEngine {
+  // The alignment matrix has O(responseTokens * expectedTokens) memory/time.
+  // Enforce deterministic limits rather than letting large pasted/speech text
+  // exhaust device resources or freeze the learning view.
+  static const int maxScoreTextCodeUnits = 16000;
+  static const int maxScoreMatrixCells = 250000;
+
+  static const AnswerScore unscorableAnswer = AnswerScore(
+    score: 0,
+    missingWords: <String>[],
+    extraWords: <String>[],
+    scorable: false,
+  );
+
   LearningEngine({Random? random}) : _random = random ?? Random();
   final Random _random;
+  // Weak keys avoid retaining old videos' timeline lists after they are
+  // replaced. Segment timelines must be immutable; subtitle replacements
+  // pass a fresh list, as segmentsFromCues() guarantees.
+  final Expando<_TimelineEndIndex> _timelineIndices =
+      Expando<_TimelineEndIndex>('learning-active-cue-index');
 
+  /// Expects an immutable list sorted by start time. Captions may overlap.
   LearningSegment? segmentAt(List<LearningSegment> segments, Duration position) {
+    if (segments.isEmpty) return null;
     var lo = 0;
-    var hi = segments.length - 1;
-    while (lo <= hi) {
+    var hi = segments.length;
+    // Find the first cue starting strictly after the playback position.
+    while (lo < hi) {
       final mid = (lo + hi) >> 1;
-      final s = segments[mid];
-      if (position < s.start) {
-        hi = mid - 1;
-      } else if (position >= s.end) {
+      if (segments[mid].start <= position) {
         lo = mid + 1;
       } else {
-        return s;
+        hi = mid;
       }
     }
-    return null;
+    var index = _timelineIndices[segments];
+    if (index == null) {
+      index = _TimelineEndIndex.build(segments);
+      _timelineIndices[segments] = index;
+    }
+    final active = index.lastActiveBefore(lo, position.inMicroseconds);
+    return active >= 0 ? segments[active] : null;
   }
 
+  /// Dictation and target-language exercises expect spoken source dialogue.
+  /// Translation-to-native exercises expect the learner's own language.
+  static String answerLanguageForQuestion(
+    QuizQuestion question, {
+    required String nativeLanguage,
+    required String targetLanguage,
+  }) => question.kind == QuizKind.translateToNative
+      ? nativeLanguage
+      : targetLanguage;
+
   QuizQuestion questionFor(LearningSegment segment, {required LearningMode mode, String nativeLanguage = 'en'}) {
-    final translated = segment.translation?.trim();
+    // Speaker annotations belong in dialogue metadata/UI, not in the words
+    // a learner must dictate, translate, or pronounce.
+    final spoken = parseDialogueLine(segment.original).text;
+    final translated = segment.translation == null
+        ? null
+        : parseDialogueLine(segment.translation!).text.trim();
     final ar = nativeLanguage.toLowerCase().startsWith('ar');
     if (mode == LearningMode.listening) {
-      return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته في المقطع' : 'Type exactly what you heard', answer: segment.original, segment: segment);
+      return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته في المقطع' : 'Type exactly what you heard', answer: spoken, segment: segment);
     }
     if (translated != null && translated.isNotEmpty) {
       if (_random.nextBool()) {
         return QuizQuestion(kind: QuizKind.translateToNative, prompt: ar ? 'ترجم الجملة إلى لغتك' : 'Translate the line into your language', answer: translated, segment: segment);
       }
-      return QuizQuestion(kind: QuizKind.translateToTarget, prompt: ar ? 'اكتب الجملة باللغة التي تتعلمها' : 'Write the line in the language you are learning', answer: segment.original, segment: segment);
+      return QuizQuestion(kind: QuizKind.translateToTarget, prompt: ar ? 'اكتب الجملة باللغة التي تتعلمها' : 'Write the line in the language you are learning', answer: spoken, segment: segment);
     }
-    final words = segment.original.split(RegExp(r'\s+')).where((e) => e.length > 2).toList();
-    if (words.isNotEmpty) {
-      final word = words[_random.nextInt(words.length)];
-      return QuizQuestion(kind: QuizKind.fillBlank, prompt: segment.original.replaceFirst(word, '_____'), answer: word, segment: segment);
+    // Keep only a single scoring unit hidden. Whitespace tokenization can
+    // hide an entire unspaced Chinese, Japanese, Korean, or Thai sentence.
+    final lettersOrDigits = RegExp(r'[\p{L}\p{N}]', unicode: true);
+    final units = tokenizeLearningText(spoken)
+        .where((part) => lettersOrDigits.hasMatch(part))
+        .toList(growable: false);
+    // A single word or unknown single token has no context left once hidden.
+    if (units.length >= 2) {
+      final unit = units[_random.nextInt(units.length)];
+      final match = RegExp(
+        RegExp.escape(unit),
+        caseSensitive: false,
+        unicode: true,
+      ).firstMatch(spoken);
+      if (match != null) {
+        return QuizQuestion(
+          kind: QuizKind.fillBlank,
+          prompt: spoken.replaceRange(match.start, match.end, '_____'),
+          answer: match.group(0)!,
+          segment: segment,
+        );
+      }
     }
-    return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته' : 'Type what you heard', answer: segment.original, segment: segment);
+    return QuizQuestion(kind: QuizKind.dictation, prompt: ar ? 'اكتب ما سمعته' : 'Type what you heard', answer: spoken, segment: segment);
   }
 
   double scoreAnswer(String answer, String expected) => scoreDetailed(answer, expected).score;
 
   AnswerScore scoreDetailed(String answer, String expected) {
-    final actual = _tokens(answer);
-    final target = _tokens(expected);
+    // Tokenization itself also allocates: reject pathological input first.
+    if (answer.length > maxScoreTextCodeUnits ||
+        expected.length > maxScoreTextCodeUnits) {
+      return unscorableAnswer;
+    }
+    final actual = tokenizeLearningText(answer);
+    final target = tokenizeLearningText(expected);
+    if ((actual.length + 1) * (target.length + 1) >
+        maxScoreMatrixCells) {
+      return unscorableAnswer;
+    }
     if (target.isEmpty) {
       return AnswerScore(
         score: actual.isEmpty ? 1.0 : 0.0,
@@ -127,11 +240,4 @@ class LearningEngine {
     );
   }
 
-  List<String> _tokens(String value) => value
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^\w\u00C0-\u024F\u0400-\u052F\u0600-\u06FF\u0750-\u077F\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]+', unicode: true), ' ')
-      .trim()
-      .split(RegExp(r'\s+'))
-      .where((e) => e.isNotEmpty)
-      .toList();
 }

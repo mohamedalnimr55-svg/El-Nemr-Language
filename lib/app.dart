@@ -16,6 +16,7 @@ import 'theme/app_theme.dart';
 import 'learning/models/learner_profile.dart';
 import 'learning/screens/onboarding_screen.dart';
 import 'learning/services/learner_profile_store.dart';
+import 'learning/services/ai_language_service.dart';
 
 /// Used by the "Open with" intent handler to navigate without a BuildContext.
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
@@ -129,6 +130,9 @@ class _AppEntryState extends State<_AppEntry> {
   }
 
   Future<void> _load() async {
+    // Restore the learner-selected AI gateway before entering the player.
+    // A missing gateway must never block local learning.
+    try { await AiLanguageService.loadConfiguration(); } catch (_) {}
     final profile = await LearnerProfileStore.load();
     if (!mounted) return;
     setState(() {
