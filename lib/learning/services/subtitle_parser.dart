@@ -47,8 +47,12 @@ class SubtitleParser {
       i++;
       final text = <String>[];
       while (i < lines.length && lines[i].trim().isNotEmpty) { text.add(lines[i]); i++; }
-      final value = _clean(text.join('\n'));
-      if (value.isNotEmpty) cues.add(SubtitleCue(start: start, end: end, text: value));
+      // Preserve WebVTT speaker metadata in a dialogue-label form that
+      // parseDialogueLine() understands. Styling tags still get stripped.
+      final value = _cleanVttCue(text.join('\n'));
+      if (value.isNotEmpty && end > start) {
+        cues.add(SubtitleCue(start: start, end: end, text: value));
+      }
     }
     return cues;
   }
@@ -98,6 +102,24 @@ class SubtitleParser {
     }
     out.add(rest);
     return out;
+  }
+
+  static String _cleanVttCue(String value) {
+    final raw = value.trimLeft();
+    final voice = RegExp(
+      r'^<v(?:\\.[^ >]+)*\\s+([^>]+)>',
+      caseSensitive: false,
+    ).firstMatch(raw);
+    final cleaned = _clean(value);
+    final speaker = voice?.group(1)?.trim();
+    if (cleaned.isEmpty ||
+        speaker == null ||
+        speaker.isEmpty ||
+        speaker.length > 32 ||
+        speaker.contains(RegExp(r'[\\r\\n\\[\\]]'))) {
+      return cleaned;
+    }
+    return '[$speaker] $cleaned';
   }
 
   static String _clean(String value) => value
