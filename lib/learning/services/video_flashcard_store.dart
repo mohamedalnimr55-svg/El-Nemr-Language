@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/learning_models.dart';
+import 'learning_write_queue.dart';
 
 class VideoFlashcardStore {
   const VideoFlashcardStore._();
@@ -23,7 +24,8 @@ class VideoFlashcardStore {
     }
   }
 
-  static Future<bool> toggle(String videoKey, LearningSegment segment) async {
+  static Future<bool> toggle(String videoKey, LearningSegment segment) =>
+      LearningWriteQueue.run<bool>(_key(videoKey), () async {
     final prefs = await SharedPreferences.getInstance();
     final cards = await load(videoKey);
     if (cards.containsKey(segment.id)) {
@@ -44,9 +46,10 @@ class VideoFlashcardStore {
     };
     await prefs.setString(_key(videoKey), jsonEncode(cards));
     return true;
-  }
+  });
 
-  static Future<void> review(String videoKey, String segmentId, double score) async {
+  static Future<void> review(String videoKey, String segmentId, double score) =>
+      LearningWriteQueue.run<void>(_key(videoKey), () async {
     final prefs = await SharedPreferences.getInstance();
     final cards = await load(videoKey);
     final card = cards[segmentId];
@@ -81,6 +84,20 @@ class VideoFlashcardStore {
       ..['lastScore'] = score
       ..['dueAt'] = DateTime.now().add(Duration(days: interval)).toIso8601String();
     await prefs.setString(_key(videoKey), jsonEncode(cards));
+  });
+
+  /// Only review flashcards still backed by a subtitle in the current video.
+  /// Stale cards can remain after subtitle replacement/removal; they should
+  /// not block a valid due card or inflate the user's review count.
+  static List<MapEntry<String, Map<String, dynamic>>> dueForSegments(
+    Map<String, Map<String, dynamic>> cards,
+    Iterable<String> activeSegmentIds, {
+    DateTime? now,
+  }) {
+    final ids = activeSegmentIds.toSet();
+    return cards.entries
+        .where((entry) => ids.contains(entry.key) && isDue(entry.value, now: now))
+        .toList(growable: false);
   }
 
   static bool isDue(Map<String, dynamic> card, {DateTime? now}) {

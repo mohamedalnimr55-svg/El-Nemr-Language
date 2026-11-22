@@ -10,6 +10,21 @@ void main() {
     extraWords: <String>[],
   );
 
+  test('shadowing without measured speech time does not invent pace', () {
+    const partial = AnswerScore(
+      score: 0.8,
+      missingWords: <String>['today'],
+      extraWords: <String>[],
+    );
+    final assessment = assessSpeech(
+      answer: partial,
+      expectedText: 'Where are you going today',
+      expectedDuration: const Duration(seconds: 3),
+    );
+    expect(assessment.pace, isNull);
+    expect(assessment.overall, closeTo(0.8 * 0.70 + 0.8 * 0.30, 0.001));
+  });
+
   test('matching words at actor pace scores very highly', () {
     final result = assessSpeech(
       answer: perfect,
