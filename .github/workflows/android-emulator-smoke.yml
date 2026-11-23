@@ -1,0 +1,114 @@
+name: Android Emulator Cold Launch
+
+on:
+  pull_request:
+    branches: [full-native-build]
+    paths:
+      - 'lib/**'
+      - 'android/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'scripts/android_emulator_smoke.sh'
+      - '.github/workflows/android-emulator-smoke.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: emulator-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android-emulator-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out tested sources
+        uses: actions/checkout@v5
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: stable
+          cache: true
+
+      - name: Install native Android build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then SDKMANAGER="$(command -v sdkmanager)"; fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" \
+            'platforms;android-36' \
+            'build-tools;36.0.0' \
+            'ndk;28.2.13676358'
+
+      # No production signing secret is exposed to source from a PR.
+      # Unlike Debug, Release mode runs R8 and Flutter's release AOT compiler.
+      - name: Create isolated release validation signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          PASS="$(openssl rand -hex 18)"
+          KEYSTORE="$RUNNER_TEMP/elnemr-emulator-validation.jks"
+          keytool -genkeypair -noprompt \
+            -keystore "$KEYSTORE" -storepass "$PASS" -keypass "$PASS" \
+            -alias elnemr-ci -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname 'CN=El-Nemr Language Emulator CI,O=El-Nemr Language,C=EG'
+          {
+            echo "ELNEMR_KEYSTORE_PATH=$KEYSTORE"
+            echo "ELNEMR_KEYSTORE_PASSWORD=$PASS"
+            echo "ELNEMR_KEY_ALIAS=elnemr-ci"
+            echo "ELNEMR_KEY_PASSWORD=$PASS"
+            echo "ELNEMR_SIGNING_MODE=ephemeral-validation"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and verify Android x64 release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter pub get
+          bash scripts/retry_android_build.sh flutter build apk --release --no-pub --target-platform android-x64
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+
+      - name: Enable KVM acceleration when available
+        shell: bash
+        run: |
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod 666 /dev/kvm
+            echo 'KVM acceleration enabled'
+          else
+            echo '::warning::KVM unavailable; emulator may run slowly'
+          fi
+
+      - name: Boot emulator and smoke-test native app launch
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-boot-timeout: 900
+          script: bash scripts/android_emulator_smoke.sh build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload emulator logcat and screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: El-Nemr-Language-Android-Emulator-Smoke
+          path: android-emulator-smoke-results/
+          if-no-files-found: warn
+          retention-days: 14

@@ -5618,7 +5618,10 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   AdaptiveLearningDecision _smartCoachDecision(LearningSegment segment) {
     final raw = _learningProgress[segment.id];
-    final progress = raw is Map ? Map<String, dynamic>.from(raw) : const <String, dynamic>{};
+    final stored = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    final progress = LearningProgressStore.matchesSegment(stored, segment)
+        ? stored
+        : <String, dynamic>{};
     return AdaptiveLearningPolicy.decide(
       difficulty: segment.difficulty,
       bestScore: (progress['best'] as num?)?.toDouble(),
@@ -5666,8 +5669,18 @@ class _PlayerScreenState extends State<PlayerScreen>
     else { _exo?.setSpeed(speed); }
   }
 
-  Future<void> _recordLearningScore(String segmentId, double score) async {
-    await LearningProgressStore.record(_learningKey, segmentId, score);
+  Future<void> _recordLearningScore(LearningSegment captured, double score) async {
+    // Quiz/speech responses may finish after a subtitle or translation swap.
+    // Never attach a stale answer to the replacement with the same ID.
+    if (!_learningSegments.any(
+      (current) => LearningProgressStore.sameSegmentIdentity(captured, current),
+    )) return;
+    await LearningProgressStore.record(
+      _learningKey,
+      captured.id,
+      score,
+      segment: captured,
+    );
     try { _learningProgress = await LearningProgressStore.load(_learningKey); } catch (_) {}
     if (_smartCoachEnabled) {
       _smartCoachSegmentId = null;
@@ -5784,8 +5797,8 @@ class _PlayerScreenState extends State<PlayerScreen>
           _editLearningSubtitleLayout = value;
           if (mounted) setState(() {});
         },
-        onRecordScore: (segmentId, score) {
-          unawaited(_recordLearningScore(segmentId, score));
+        onRecordScore: (segment, score) {
+          unawaited(_recordLearningScore(segment, score));
         },
         onPauseForSpeech: () {
           if (_mpvReady) {
