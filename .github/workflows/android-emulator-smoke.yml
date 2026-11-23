@@ -1,0 +1,143 @@
+name: Android Release Emulator Compatibility
+
+on:
+  pull_request:
+    branches: [full-native-build]
+    paths:
+      - 'lib/**'
+      - 'android/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'scripts/android_emulator_smoke.sh'
+      - '.github/workflows/android-emulator-smoke.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: emulator-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-emulator-release:
+    name: Build signed emulator release APK once
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out tested sources
+        uses: actions/checkout@v5
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: stable
+          cache: true
+
+      - name: Install native Android build dependencies with bounded retry
+        shell: bash
+        run: |
+          bash scripts/retry_android_sdk_install.sh \
+            'platforms;android-36' \
+            'build-tools;36.0.0' \
+            'ndk;28.2.13676358'
+
+      - name: Generate isolated release validation signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          PASS="$(openssl rand -hex 18)"
+          KEYSTORE="$RUNNER_TEMP/elnemr-emulator-validation.jks"
+          keytool -genkeypair -noprompt \
+            -keystore "$KEYSTORE" -storepass "$PASS" -keypass "$PASS" \
+            -alias elnemr-ci -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname 'CN=El-Nemr Language Emulator CI,O=El-Nemr Language,C=EG'
+          {
+            echo "ELNEMR_KEYSTORE_PATH=$KEYSTORE"
+            echo "ELNEMR_KEYSTORE_PASSWORD=$PASS"
+            echo "ELNEMR_KEY_ALIAS=elnemr-ci"
+            echo "ELNEMR_KEY_PASSWORD=$PASS"
+            echo "ELNEMR_SIGNING_MODE=ephemeral-validation"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and verify Android x64 release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter pub get
+          bash scripts/retry_android_build.sh flutter build apk --release --no-pub --target-platform android-x64
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+
+      - name: Transfer single validation APK to API-level test jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: El-Nemr-Language-Emulator-Release-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  android-release-matrix:
+    name: Android ${{ matrix.api-level }} Release startup
+    needs: build-emulator-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        api-level: [26, 33, 35]
+    steps:
+      - name: Check out tested smoke script
+        uses: actions/checkout@v5
+
+      - name: Download exact same signed Release APK
+        uses: actions/download-artifact@v4
+        with:
+          name: El-Nemr-Language-Emulator-Release-APK
+          path: emulator-release-apk
+
+      - name: Verify downloaded APK exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s emulator-release-apk/app-release.apk
+          sha256sum emulator-release-apk/app-release.apk
+
+      - name: Enable KVM acceleration
+        shell: bash
+        run: |
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod 666 /dev/kvm
+          else
+            echo '::warning::No KVM acceleration; emulator may run slowly'
+          fi
+
+      - name: Boot Android ${{ matrix.api-level }} and smoke-test release startup
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-boot-timeout: 900
+          script: EXPECTED_API_LEVEL=${{ matrix.api-level }} bash scripts/android_emulator_smoke.sh emulator-release-apk/app-release.apk
+
+      - name: Upload Android ${{ matrix.api-level }} logcat and screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: El-Nemr-Language-Release-Smoke-API-${{ matrix.api-level }}
+          path: android-emulator-smoke-results/
+          if-no-files-found: warn
+          retention-days: 14
