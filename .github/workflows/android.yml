@@ -72,14 +72,10 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install required Android SDK components
+      - name: Install required Android SDK components with bounded retry
         shell: bash
         run: |
-          set -euo pipefail
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [[ ! -x "$SDKMANAGER" ]]; then SDKMANAGER="$(command -v sdkmanager)"; fi
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" \
+          bash scripts/retry_android_sdk_install.sh \
             "platforms;android-${COMPILE_SDK}" \
             "build-tools;${BUILD_TOOLS}" \
             "ndk;${NDK_VERSION}"
