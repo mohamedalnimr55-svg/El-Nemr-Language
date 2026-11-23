@@ -51,7 +51,12 @@ adb shell pm path "$PACKAGE" | grep -q '^package:'
 launch_and_verify() {
   local name="$1"
   adb shell am force-stop "$PACKAGE"
-  adb logcat -c
+  # Android 8 emulator images occasionally reject clearing the main log
+  # with "failed to clear the 'main' log". Log reset is diagnostics-only:
+  # never abort the actual install/launch assertion because of it.
+  if ! adb logcat -c; then
+    echo '::warning::adb logcat clear unavailable; preserving existing logs and continuing startup test'
+  fi
   adb shell am start -W -n "$PACKAGE/.MainActivity" | tee "$OUTPUT_DIR/$name.txt"
   grep -q '^Status: ok' "$OUTPUT_DIR/$name.txt" || {
     echo "Android ActivityManager did not report successful $name." >&2
