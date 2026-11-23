@@ -33,7 +33,15 @@ if (( booted == 0 )); then
   exit 1
 fi
 printf 'Emulator Android: %s\n' "$(adb shell getprop ro.build.version.release | tr -d '\r')"
+actual_api="$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
+printf 'Emulator API level: %s\n' "$actual_api"
 printf 'Emulator ABI: %s\n' "$(adb shell getprop ro.product.cpu.abi | tr -d '\r')"
+printf 'Release APK SHA-256: '
+sha256sum "$APK"
+if [[ -n "${EXPECTED_API_LEVEL:-}" && "$actual_api" != "$EXPECTED_API_LEVEL" ]]; then
+  echo "Wrong emulator Android API: expected $EXPECTED_API_LEVEL, got $actual_api" >&2
+  exit 1
+fi
 
 # The APK uses the workflow's one-time validation key; no production secret.
 adb install -r "$APK" | tee "$OUTPUT_DIR/install.txt"
