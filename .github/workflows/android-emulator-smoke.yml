@@ -52,12 +52,36 @@ jobs:
             'build-tools;36.0.0' \
             'ndk;28.2.13676358'
 
-      - name: Build Android x64 emulator APK
+      # No production signing secret is exposed to source from a PR.
+      # Unlike Debug, Release mode runs R8 and Flutter's release AOT compiler.
+      - name: Create isolated release validation signing key
         shell: bash
         run: |
+          set -euo pipefail
+          PASS="$(openssl rand -hex 18)"
+          KEYSTORE="$RUNNER_TEMP/elnemr-emulator-validation.jks"
+          keytool -genkeypair -noprompt \
+            -keystore "$KEYSTORE" -storepass "$PASS" -keypass "$PASS" \
+            -alias elnemr-ci -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname 'CN=El-Nemr Language Emulator CI,O=El-Nemr Language,C=EG'
+          {
+            echo "ELNEMR_KEYSTORE_PATH=$KEYSTORE"
+            echo "ELNEMR_KEYSTORE_PASSWORD=$PASS"
+            echo "ELNEMR_KEY_ALIAS=elnemr-ci"
+            echo "ELNEMR_KEY_PASSWORD=$PASS"
+            echo "ELNEMR_SIGNING_MODE=ephemeral-validation"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and verify Android x64 release APK
+        shell: bash
+        run: |
+          set -euo pipefail
           flutter pub get
-          flutter build apk --debug --no-pub --target-platform android-x64
-          test -s build/app/outputs/flutter-apk/app-debug.apk
+          bash scripts/retry_android_build.sh flutter build apk --release --no-pub --target-platform android-x64
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Enable KVM acceleration when available
         shell: bash
@@ -78,7 +102,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-boot-timeout: 900
-          script: bash scripts/android_emulator_smoke.sh
+          script: bash scripts/android_emulator_smoke.sh build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload emulator logcat and screenshot
         if: always()
