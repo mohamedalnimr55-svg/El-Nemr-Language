@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Checks Android native startup, not physical-device acceptance or playback.
+# Checks signed Release (AOT/R8) Android native startup, not device QA or playback.
 PACKAGE=com.elnemr.language
-APK=build/app/outputs/flutter-apk/app-debug.apk
+APK=build/app/outputs/flutter-apk/app-release.apk
 if (( $# > 0 )); then APK="$1"; fi
 OUTPUT_DIR=android-emulator-smoke-results
 mkdir -p "$OUTPUT_DIR"
@@ -35,7 +35,7 @@ fi
 printf 'Emulator Android: %s\n' "$(adb shell getprop ro.build.version.release | tr -d '\r')"
 printf 'Emulator ABI: %s\n' "$(adb shell getprop ro.product.cpu.abi | tr -d '\r')"
 
-# Debug signing avoids exposure of any production or temporary release key.
+# The APK uses the workflow's one-time validation key; no production secret.
 adb install -r "$APK" | tee "$OUTPUT_DIR/install.txt"
 grep -q '^Success' "$OUTPUT_DIR/install.txt"
 adb shell pm path "$PACKAGE" | grep -q '^package:'
