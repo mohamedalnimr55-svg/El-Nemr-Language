@@ -135,7 +135,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-boot-timeout: 900
-          script: bash scripts/android_emulator_smoke.sh emulator-release-apk/app-release.apk
+          script: EXPECTED_API_LEVEL=${{ matrix.api-level }} bash scripts/android_emulator_smoke.sh emulator-release-apk/app-release.apk
 
       - name: Upload Android ${{ matrix.api-level }} logcat and screenshot
         if: always()
