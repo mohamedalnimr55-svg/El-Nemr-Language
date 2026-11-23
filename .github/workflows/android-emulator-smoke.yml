@@ -1,4 +1,4 @@
-name: Android Emulator Cold Launch
+name: Android Release Emulator Compatibility
 
 on:
   pull_request:
@@ -20,9 +20,10 @@ permissions:
   contents: read
 
 jobs:
-  android-emulator-smoke:
+  build-emulator-release:
+    name: Build signed emulator release APK once
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - name: Check out tested sources
         uses: actions/checkout@v5
@@ -52,9 +53,7 @@ jobs:
             'build-tools;36.0.0' \
             'ndk;28.2.13676358'
 
-      # No production signing secret is exposed to source from a PR.
-      # Unlike Debug, Release mode runs R8 and Flutter's release AOT compiler.
-      - name: Create isolated release validation signing key
+      - name: Generate isolated release validation signing key
         shell: bash
         run: |
           set -euo pipefail
@@ -83,32 +82,66 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
 
-      - name: Enable KVM acceleration when available
+      - name: Transfer single validation APK to API-level test jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: El-Nemr-Language-Emulator-Release-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  android-release-matrix:
+    name: Android ${{ matrix.api-level }} Release startup
+    needs: build-emulator-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        api-level: [26, 33, 35]
+    steps:
+      - name: Check out tested smoke script
+        uses: actions/checkout@v5
+
+      - name: Download exact same signed Release APK
+        uses: actions/download-artifact@v4
+        with:
+          name: El-Nemr-Language-Emulator-Release-APK
+          path: emulator-release-apk
+
+      - name: Verify downloaded APK exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s emulator-release-apk/app-release.apk
+          sha256sum emulator-release-apk/app-release.apk
+
+      - name: Enable KVM acceleration
         shell: bash
         run: |
           if [[ -e /dev/kvm ]]; then
             sudo chmod 666 /dev/kvm
-            echo 'KVM acceleration enabled'
           else
-            echo '::warning::KVM unavailable; emulator may run slowly'
+            echo '::warning::No KVM acceleration; emulator may run slowly'
           fi
 
-      - name: Boot emulator and smoke-test native app launch
+      - name: Boot Android ${{ matrix.api-level }} and smoke-test release startup
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: ${{ matrix.api-level }}
           target: google_apis
           arch: x86_64
           profile: pixel_6
           disable-animations: true
           emulator-boot-timeout: 900
-          script: bash scripts/android_emulator_smoke.sh build/app/outputs/flutter-apk/app-release.apk
+          script: bash scripts/android_emulator_smoke.sh emulator-release-apk/app-release.apk
 
-      - name: Upload emulator logcat and screenshot
+      - name: Upload Android ${{ matrix.api-level }} logcat and screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: El-Nemr-Language-Android-Emulator-Smoke
+          name: El-Nemr-Language-Release-Smoke-API-${{ matrix.api-level }}
           path: android-emulator-smoke-results/
           if-no-files-found: warn
           retention-days: 14
